@@ -281,20 +281,24 @@ export function addInitialBoothRow(data = {}) {
     if (!list) return;
 
     const row = document.createElement("div");
-    row.className = "initial-booth-row p-3 rounded-xl bg-[#f8f9fc] border border-[#ecedfa] flex flex-col sm:flex-row items-start sm:items-center gap-2.5 transition-all shadow-2xs";
+    row.className = "initial-booth-row p-3 rounded-xl bg-[#f8f9fc] border border-[#ecedfa] flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 transition-all shadow-2xs";
+
+    const namePlaceholder = t("host.booth_name_placeholder", "Tên trạm / gian hàng *");
+    const locPlaceholder = t("host.booth_loc_placeholder", "Vị trí (VD: Bàn A1)");
+    const codePlaceholder = t("host.booth_code_placeholder", "Mã 6 số (tự sinh)");
 
     row.innerHTML = `
         <input type="hidden" class="booth-id-field" value="${data._id || ''}" />
-        <div class="flex-1 w-full sm:w-auto">
-            <input type="text" class="input booth-name-field py-2 text-xs font-semibold" placeholder="Tên trạm / gian hàng *" value="${data.name || ''}" required />
+        <div class="booth-name-wrap flex-1 min-w-0 w-full sm:w-auto">
+            <input type="text" class="input booth-name-field text-xs font-semibold" placeholder="${namePlaceholder}" data-i18n-placeholder="host.booth_name_placeholder" value="${data.name || ''}" required />
         </div>
-        <div class="w-full sm:w-[180px]">
-            <input type="text" class="input booth-loc-field py-2 text-xs" placeholder="Vị trí (VD: Bàn A1)" value="${data.location || ''}" />
+        <div class="booth-loc-wrap w-full sm:w-48 shrink-0">
+            <input type="text" class="input booth-loc-field text-xs" placeholder="${locPlaceholder}" data-i18n-placeholder="host.booth_loc_placeholder" value="${data.location || ''}" />
         </div>
-        <div class="w-full sm:w-[140px]">
-            <input type="text" maxlength="6" class="input booth-code-field py-2 text-xs font-mono uppercase font-bold text-indigo-700 tracking-wider" placeholder="Mã 6 số (tự sinh)" value="${data.boothCode || ''}" />
+        <div class="booth-code-wrap w-full sm:w-36 shrink-0">
+            <input type="text" maxlength="6" class="input booth-code-field text-xs font-mono uppercase font-bold text-indigo-700 tracking-wider" placeholder="${codePlaceholder}" data-i18n-placeholder="host.booth_code_placeholder" value="${data.boothCode || ''}" />
         </div>
-        <button type="button" class="btn-remove-booth-row w-8 h-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer transition-colors shrink-0 self-end sm:self-center" title="Xóa trạm này">
+        <button type="button" class="btn-remove-booth-row w-9 h-9 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer transition-colors shrink-0 self-end sm:self-center" title="Xóa trạm này">
             <span class="material-symbols-outlined text-lg">delete</span>
         </button>
     `;

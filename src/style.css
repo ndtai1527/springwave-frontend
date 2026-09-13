@@ -5423,6 +5423,46 @@ select.input {
 }
 
 /* =========================
+   MULTI-BOOTH INITIAL ROWS
+========================= */
+
+.initial-booth-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .initial-booth-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+  .initial-booth-row .booth-name-wrap {
+    flex: 1 1 0% !important;
+    min-width: 180px !important;
+    width: auto !important;
+  }
+  .initial-booth-row .booth-loc-wrap {
+    flex: 0 0 190px !important;
+    width: 190px !important;
+  }
+  .initial-booth-row .booth-code-wrap {
+    flex: 0 0 145px !important;
+    width: 145px !important;
+  }
+}
+
+.initial-booth-row .input {
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  border-radius: 12px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  background-color: #ffffff !important;
+}
+
+/* =========================
    LOCATION / MAP PICKER
 ========================= */
 
