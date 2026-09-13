@@ -27,7 +27,14 @@ function playChime(toneType = 'beep_high') {
     osc.connect(gain);
     gain.connect(ctx.destination);
 
-    if (toneType === 'chime_success' || toneType === 'arcade') {
+    if (toneType === 'buzz' || toneType === 'error') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.25);
+    } else if (toneType === 'chime_success' || toneType === 'arcade') {
       osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
       osc.frequency.exponentialRampToValueAtTime(1046.50, ctx.currentTime + 0.12); // C6
       gain.gain.setValueAtTime(0.08, ctx.currentTime);
@@ -366,14 +373,30 @@ async function handleScannedCode(rawCode) {
   const event = currentSession.event;
   const kioskConfig = currentSession.kioskConfig;
 
-  // Phát âm thanh check-in không độ trễ
-  playChime(kioskConfig.soundTone || 'beep_high');
-
   // Tra cứu siêu tốc trên local cache
   const cachedStudent = studentMap.get(cleanCode);
   const studentName = cachedStudent ? cachedStudent.fullname : 'Sinh viên tham gia';
-  const studentId = cachedStudent ? cachedStudent.studentId : cleanCode;
+  const studentId = (cachedStudent && cachedStudent.studentId) ? cachedStudent.studentId : cleanCode;
   const attendanceId = cachedStudent ? cachedStudent.attendanceId : null;
+
+  // 1. Kiểm tra nếu sinh viên này đã check-in tại trạm này trước đó (Local Cache Guard)
+  if (cachedStudent && Array.isArray(cachedStudent.visitedBooths) && cachedStudent.visitedBooths.includes(booth.boothCode)) {
+    playChime('buzz');
+    showResultFlyout({
+      isSuccess: false,
+      title: 'Đã check-in trước đó!',
+      studentName,
+      studentId,
+      message: `Bạn đã được ghi nhận tham quan tại ${booth.name} rồi.`
+    });
+    setTimeout(() => {
+      scanCooldown = false;
+    }, 1500);
+    return;
+  }
+
+  // Phát âm thanh check-in thành công
+  playChime(kioskConfig.soundTone || 'beep_high');
 
   // Hiển thị Card chúc mừng ngay lập tức (< 50ms)
   showResultFlyout({
@@ -394,8 +417,8 @@ async function handleScannedCode(rawCode) {
 
   // Đẩy bản ghi điểm danh kèm ảnh WebP lên Worker
   const checkinPayload = {
-    eventId: event._id,
-    boothCode: booth.boothCode,
+    eventId: event._id || event.id,
+    boothCode: booth.boothCode || booth.code,
     studentId,
     attendanceId,
     photoBase64,
@@ -405,13 +428,49 @@ async function handleScannedCode(rawCode) {
 
   try {
     if (navigator.onLine) {
-      await submitKioskCheckin(checkinPayload);
+      const res = await submitKioskCheckin(checkinPayload);
+      // Cập nhật local cache ngay để các lần quét sau nhận biết tức thì
+      if (cachedStudent) {
+        if (!cachedStudent.visitedBooths) cachedStudent.visitedBooths = [];
+        if (!cachedStudent.visitedBooths.includes(booth.boothCode)) {
+          cachedStudent.visitedBooths.push(booth.boothCode);
+        }
+      }
+      if (res?.checkinCount && counterEl) {
+        counterEl.textContent = res.checkinCount;
+      }
     } else {
       enqueueOfflineCheckin(checkinPayload);
     }
   } catch (err) {
-    console.warn('[Checkin] Worker push deferred to offline queue:', err);
-    enqueueOfflineCheckin(checkinPayload);
+    if (err.isBusinessError || err.alreadyVisited || (err.status >= 400 && err.status < 500)) {
+      // Lỗi nghiệp vụ từ server (ví dụ đã điểm danh hoặc sự kiện chưa bắt đầu)
+      console.warn('[Checkin] Server rejected checkin:', err.message);
+      playChime('buzz');
+      showResultFlyout({
+        isSuccess: false,
+        title: err.alreadyVisited ? 'Đã check-in trước đó!' : 'Không thể điểm danh!',
+        studentName,
+        studentId,
+        message: err.message || `Lỗi ghi nhận tại ${booth.name}`
+      });
+      // Hoàn lại bộ đếm nếu lỡ tăng
+      if (counterEl) {
+        const current = parseInt(counterEl.textContent, 10) || 0;
+        if (current > 0) counterEl.textContent = current - 1;
+      }
+      // Ghi nhận vào local cache để ngăn quét lại
+      if (err.alreadyVisited && cachedStudent) {
+        if (!cachedStudent.visitedBooths) cachedStudent.visitedBooths = [];
+        if (!cachedStudent.visitedBooths.includes(booth.boothCode)) {
+          cachedStudent.visitedBooths.push(booth.boothCode);
+        }
+      }
+    } else {
+      // Lỗi mất kết nối mạng thực sự -> lưu hàng đợi offline
+      console.warn('[Checkin] Network error, deferred to offline queue:', err);
+      enqueueOfflineCheckin(checkinPayload);
+    }
   }
 
   // Cooldown ngắn (1.4s) để tiếp tục đón bạn tiếp theo
@@ -528,7 +587,11 @@ async function flushOfflineQueue() {
     try {
       await submitKioskCheckin(item);
     } catch (err) {
-      remaining.push(item);
+      if (err.isBusinessError || err.alreadyVisited || (err.status >= 400 && err.status < 500)) {
+        console.warn('[OfflineQueue] Dropping invalid item from retry queue:', err.message);
+      } else {
+        remaining.push(item);
+      }
     }
   }
 

@@ -157,11 +157,20 @@ export async function submitKioskCheckin({
     });
     const result = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(result.error || 'Lỗi xử lý điểm danh tại máy chủ Worker');
+      const err = new Error(result.error || result.message || 'Lỗi xử lý điểm danh tại máy chủ');
+      err.status = res.status;
+      err.isBusinessError = res.status >= 400 && res.status < 500;
+      err.alreadyVisited = result.alreadyVisited || false;
+      throw err;
     }
     return result;
   } catch (workerErr) {
-    // Nếu Worker không phản hồi, thử đồng bộ trực tiếp qua Backend API
+    // Nếu là lỗi nghiệp vụ (4xx như duplicate, sự kiện chưa bắt đầu, mã không hợp lệ), ném lỗi ngay
+    if (workerErr.isBusinessError) {
+      throw workerErr;
+    }
+
+    // Nếu Worker gặp sự cố kết nối mạng hoặc lỗi 5xx, mới thử fallback qua Backend API
     const res2 = await fetch(`${API_BASE_URL}/api/booths/manual-checkin`, {
       method: 'POST',
       headers: {
@@ -179,7 +188,11 @@ export async function submitKioskCheckin({
     });
     const fallbackRes = await res2.json().catch(() => ({}));
     if (!res2.ok) {
-      throw new Error(fallbackRes.error || workerErr.message || 'Checkin thất bại');
+      const err = new Error(fallbackRes.error || workerErr.message || 'Checkin thất bại');
+      err.status = res2.status;
+      err.isBusinessError = res2.status >= 400 && res2.status < 500;
+      err.alreadyVisited = fallbackRes.alreadyVisited || false;
+      throw err;
     }
     return fallbackRes;
   }
