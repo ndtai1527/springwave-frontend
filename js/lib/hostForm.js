@@ -7,6 +7,7 @@ import { getUser } from "../lib/session.js";
 import { TURNSTILE_SITE_KEY } from "../config.js";
 import { toLocalISODate } from "../lib/utils.js";
 import { t } from "../lib/i18n.js";
+import { getBoothsByEvent } from "../api/booth.js";
 
 const MAX_FILES = 10;
 let turnstileWidgetId = null;
@@ -275,12 +276,53 @@ export function initCheckinRulesToggle() {
     });
 }
 
+export function addInitialBoothRow(data = {}) {
+    const list = document.getElementById("initial-booths-list");
+    if (!list) return;
+
+    const row = document.createElement("div");
+    row.className = "initial-booth-row p-3 rounded-xl bg-[#f8f9fc] border border-[#ecedfa] flex flex-col sm:flex-row items-start sm:items-center gap-2.5 transition-all shadow-2xs";
+
+    row.innerHTML = `
+        <input type="hidden" class="booth-id-field" value="${data._id || ''}" />
+        <div class="flex-1 w-full sm:w-auto">
+            <input type="text" class="input booth-name-field py-2 text-xs font-semibold" placeholder="Tên trạm / gian hàng *" value="${data.name || ''}" required />
+        </div>
+        <div class="w-full sm:w-[180px]">
+            <input type="text" class="input booth-loc-field py-2 text-xs" placeholder="Vị trí (VD: Bàn A1)" value="${data.location || ''}" />
+        </div>
+        <div class="w-full sm:w-[140px]">
+            <input type="text" maxlength="6" class="input booth-code-field py-2 text-xs font-mono uppercase font-bold text-indigo-700 tracking-wider" placeholder="Mã 6 số (tự sinh)" value="${data.boothCode || ''}" />
+        </div>
+        <button type="button" class="btn-remove-booth-row w-8 h-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer transition-colors shrink-0 self-end sm:self-center" title="Xóa trạm này">
+            <span class="material-symbols-outlined text-lg">delete</span>
+        </button>
+    `;
+
+    row.querySelector(".btn-remove-booth-row")?.addEventListener("click", () => {
+        row.remove();
+    });
+
+    list.appendChild(row);
+}
+
 export function initMultiBoothToggle() {
     const checkbox = document.getElementById("hasMultiBooth");
     const fields = document.getElementById("multibooth-fields");
+    const addBtn = document.getElementById("btn-add-initial-booth");
+    const list = document.getElementById("initial-booths-list");
+
     if (!checkbox || !fields) return;
+
     checkbox.addEventListener("change", () => {
         fields.classList.toggle("hidden", !checkbox.checked);
+        if (checkbox.checked && list && list.children.length === 0) {
+            addInitialBoothRow();
+        }
+    });
+
+    addBtn?.addEventListener("click", () => {
+        addInitialBoothRow();
     });
 }
 
@@ -890,13 +932,17 @@ export async function initEditMode(eventId) {
 
     // Attendance & Rules
     if (hasAttendanceEl) hasAttendanceEl.checked = event.hasAttendance === true || event.hasAttendance === 'true';
-    const hasRules = (Number(event.lateCheckinMinutes) > 0 || Number(event.expiredCheckinMinutes) > 0);
+    const hasRules = (Number(event.lateCheckinMinutes) > 0 || Number(event.expiredCheckinMinutes) > 0 || event.allowEarlyCheckin !== undefined);
     if (enableCheckinRulesEl) {
       enableCheckinRulesEl.checked = hasRules;
       const rulesFields = document.getElementById("checkin-rules-fields");
       if (rulesFields) rulesFields.classList.toggle("hidden", !hasRules);
       if (lateMinEl) lateMinEl.value = event.lateCheckinMinutes || 0;
       if (expiredMinEl) expiredMinEl.value = event.expiredCheckinMinutes || 0;
+      const allowEarlyEl = document.getElementById("allowEarlyCheckin");
+      if (allowEarlyEl) {
+        allowEarlyEl.checked = event.allowEarlyCheckin === true || event.allowEarlyCheckin === 'true';
+      }
     }
 
     // Multi-Booth / Kiosk Mode
@@ -912,6 +958,25 @@ export async function initEditMode(eventId) {
         if (bType && event.multiBoothConfig.boothTypeLabel) bType.value = event.multiBoothConfig.boothTypeLabel;
         if (minB && event.multiBoothConfig.minBoothsRequired !== undefined) minB.value = event.multiBoothConfig.minBoothsRequired;
         if (reqP && event.multiBoothConfig.requirePhoto !== undefined) reqP.checked = Boolean(event.multiBoothConfig.requirePhoto);
+      }
+
+      // Load existing booths if editing
+      const eventId = event._id || event.id;
+      if (eventId && hasMultiBoothEl.checked) {
+        const list = document.getElementById("initial-booths-list");
+        if (list) {
+          list.innerHTML = '';
+          getBoothsByEvent(eventId).then(res => {
+            const booths = res?.booths || [];
+            if (booths.length > 0) {
+              booths.forEach(b => addInitialBoothRow(b));
+            } else {
+              addInitialBoothRow();
+            }
+          }).catch(() => {
+            addInitialBoothRow();
+          });
+        }
       }
     }
 
@@ -1222,11 +1287,14 @@ export function initFormSubmit(orgId, onSuccess) {
         if (enableCheckinRules) {
             const lateMin = parseInt(document.getElementById("lateCheckinMinutes")?.value, 10) || 0;
             const expiredMin = parseInt(document.getElementById("expiredCheckinMinutes")?.value, 10) || 0;
+            const allowEarlyCheckin = document.getElementById("allowEarlyCheckin")?.checked ?? false;
             formData.append("lateCheckinMinutes", String(lateMin));
             formData.append("expiredCheckinMinutes", String(expiredMin));
+            formData.append("allowEarlyCheckin", allowEarlyCheckin ? "true" : "false");
         } else {
             formData.append("lateCheckinMinutes", "0");
             formData.append("expiredCheckinMinutes", "0");
+            formData.append("allowEarlyCheckin", "true");
         }
         const hasMultiBooth = document.getElementById("hasMultiBooth")?.checked;
         formData.append("hasMultiBooth", hasMultiBooth ? "true" : "false");
@@ -1237,6 +1305,18 @@ export function initFormSubmit(orgId, onSuccess) {
                 requirePhoto: document.getElementById("requireBoothPhoto")?.checked ?? true
             };
             formData.append("multiBoothConfig", JSON.stringify(multiBoothConfig));
+
+            // Collect initial booths
+            const boothRows = Array.from(document.querySelectorAll("#initial-booths-list .initial-booth-row"));
+            const initialBooths = boothRows.map(r => ({
+                _id: r.querySelector(".booth-id-field")?.value || undefined,
+                name: r.querySelector(".booth-name-field")?.value?.trim() || '',
+                location: r.querySelector(".booth-loc-field")?.value?.trim() || '',
+                boothCode: r.querySelector(".booth-code-field")?.value?.trim().toUpperCase() || ''
+            })).filter(b => b.name);
+            if (initialBooths.length > 0) {
+                formData.append("initialBooths", JSON.stringify(initialBooths));
+            }
         }
         const lat = document.getElementById("locationLat")?.value;
         const lng = document.getElementById("locationLng")?.value;

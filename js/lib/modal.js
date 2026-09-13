@@ -147,8 +147,10 @@ export function showConfirmDialog(options = {}) {
     const {
       title = "",
       titleKey = "common.confirm_title",
+      defaultTitle = "",
       message = "",
       messageKey = "",
+      defaultMessage = "",
       confirmText = "",
       confirmTextKey = "common.confirm_btn",
       cancelText = "",
@@ -173,20 +175,21 @@ export function showConfirmDialog(options = {}) {
     };
     const style = iconMap[type] || iconMap.primary;
 
-    const displayTitle = title || (titleKey ? t(titleKey, params) : t("common.confirm_title"));
-    const displayMsg = message || (messageKey ? t(messageKey, params) : "");
-    const displayConfirm = confirmText || (confirmTextKey ? t(confirmTextKey) : t("common.confirm_btn"));
-    const displayCancel = cancelText || (cancelTextKey ? t(cancelTextKey) : t("common.cancel_btn"));
+    const fallbackTitle = defaultTitle || t("common.confirm_title", "Confirmation");
+    const displayTitle = title || (titleKey ? t(titleKey, params, fallbackTitle) : fallbackTitle);
+    const displayMsg = message || (messageKey ? t(messageKey, params, defaultMessage) : (defaultMessage || ""));
+    const displayConfirm = confirmText || (confirmTextKey ? t(confirmTextKey, "Confirm") : t("common.confirm_btn", "Confirm"));
+    const displayCancel = cancelText || (cancelTextKey ? t(cancelTextKey, "Cancel") : t("common.cancel_btn", "Cancel"));
 
     overlay.innerHTML = `
       <div class="dialog-card bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-3xl shadow-2xl p-6 sm:p-7 max-w-md w-full text-center relative overflow-hidden transform scale-95 transition-transform duration-200">
         <div class="w-14 h-14 rounded-2xl ${style.bg} ${style.border} ${style.color} border flex items-center justify-center mx-auto mb-4 shadow-xs">
           <span class="material-symbols-outlined text-3xl">${style.icon}</span>
         </div>
-        <h3 class="dialog-title text-lg sm:text-xl font-bold text-slate-900 mb-2 leading-tight tracking-tight" data-dialog-title-key="${titleKey}">
+        <h3 class="dialog-title text-lg sm:text-xl font-bold text-slate-900 mb-2 leading-tight tracking-tight" data-dialog-title-key="${titleKey}" data-dialog-default-title="${defaultTitle || ''}">
           ${displayTitle}
         </h3>
-        <p class="dialog-message text-xs sm:text-sm text-slate-600 leading-relaxed mb-6" data-dialog-msg-key="${messageKey}">
+        <p class="dialog-message text-xs sm:text-sm text-slate-600 leading-relaxed mb-6" data-dialog-msg-key="${messageKey}" data-dialog-default-msg="${defaultMessage || ''}">
           ${displayMsg}
         </p>
         <div class="flex items-center justify-center gap-3">
@@ -237,8 +240,10 @@ export function showAlertDialog(options = {}) {
     const {
       title = "",
       titleKey = "",
+      defaultTitle = "",
       message = "",
       messageKey = "",
+      defaultMessage = "",
       okText = "",
       okTextKey = "common.ok_btn",
       type = "info",
@@ -261,19 +266,20 @@ export function showAlertDialog(options = {}) {
     };
     const style = iconMap[type] || iconMap.info;
 
-    const displayTitle = title || (titleKey ? t(titleKey, params) : (type === 'error' ? t('common.error', 'Error') : t('common.confirm_title', 'Notice')));
-    const displayMsg = message || (messageKey ? t(messageKey, params) : "");
-    const displayOk = okText || (okTextKey ? t(okTextKey) : t("common.ok_btn", "OK"));
+    const fallbackTitle = defaultTitle || (type === 'error' ? t('common.error', 'Error') : t('common.notice', 'Notice'));
+    const displayTitle = title || (titleKey ? t(titleKey, params, fallbackTitle) : fallbackTitle);
+    const displayMsg = message || (messageKey ? t(messageKey, params, defaultMessage) : (defaultMessage || ""));
+    const displayOk = okText || (okTextKey ? t(okTextKey, "OK") : t("common.ok_btn", "OK"));
 
     overlay.innerHTML = `
       <div class="dialog-card bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-3xl shadow-2xl p-6 sm:p-7 max-w-md w-full text-center relative overflow-hidden transform scale-95 transition-transform duration-200">
         <div class="w-14 h-14 rounded-2xl ${style.bg} ${style.border} ${style.color} border flex items-center justify-center mx-auto mb-4 shadow-xs">
           <span class="material-symbols-outlined text-3xl">${style.icon}</span>
         </div>
-        <h3 class="dialog-title text-lg sm:text-xl font-bold text-slate-900 mb-2 leading-tight tracking-tight" data-dialog-title-key="${titleKey}">
+        <h3 class="dialog-title text-lg sm:text-xl font-bold text-slate-900 mb-2 leading-tight tracking-tight" data-dialog-title-key="${titleKey}" data-dialog-default-title="${defaultTitle || ''}">
           ${displayTitle}
         </h3>
-        <p class="dialog-message text-xs sm:text-sm text-slate-600 leading-relaxed mb-6" data-dialog-msg-key="${messageKey}">
+        <p class="dialog-message text-xs sm:text-sm text-slate-600 leading-relaxed mb-6" data-dialog-msg-key="${messageKey}" data-dialog-default-msg="${defaultMessage || ''}">
           ${displayMsg}
         </p>
         <div class="flex items-center justify-center">
@@ -344,11 +350,11 @@ if (typeof window !== "undefined") {
     const cancelBtn = activeDialogOverlay.querySelector(".dialog-cancel-btn");
     const okBtn = activeDialogOverlay.querySelector(".dialog-ok-btn");
 
-    if (titleEl?.dataset.dialogTitleKey) titleEl.textContent = t(titleEl.dataset.dialogTitleKey, activeDialogParams);
-    if (msgEl?.dataset.dialogMsgKey) msgEl.textContent = t(msgEl.dataset.dialogMsgKey, activeDialogParams);
-    if (confirmBtn?.dataset.dialogConfirmKey) confirmBtn.textContent = t(confirmBtn.dataset.dialogConfirmKey);
-    if (cancelBtn?.dataset.dialogCancelKey) cancelBtn.textContent = t(cancelBtn.dataset.dialogCancelKey);
-    if (okBtn?.dataset.dialogOkKey) okBtn.textContent = t(okBtn.dataset.dialogOkKey);
+    if (titleEl?.dataset.dialogTitleKey) titleEl.textContent = t(titleEl.dataset.dialogTitleKey, activeDialogParams, titleEl.dataset.dialogDefaultTitle || titleEl.textContent);
+    if (msgEl?.dataset.dialogMsgKey) msgEl.textContent = t(msgEl.dataset.dialogMsgKey, activeDialogParams, msgEl.dataset.dialogDefaultMsg || msgEl.textContent);
+    if (confirmBtn?.dataset.dialogConfirmKey) confirmBtn.textContent = t(confirmBtn.dataset.dialogConfirmKey, confirmBtn.textContent);
+    if (cancelBtn?.dataset.dialogCancelKey) cancelBtn.textContent = t(cancelBtn.dataset.dialogCancelKey, cancelBtn.textContent);
+    if (okBtn?.dataset.dialogOkKey) okBtn.textContent = t(okBtn.dataset.dialogOkKey, okBtn.textContent);
   });
 
   window.showConfirmDialog = showConfirmDialog;
