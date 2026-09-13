@@ -15,6 +15,7 @@ import {
     initOrgSelector, 
     initTurnstile, 
     initCheckinRulesToggle, 
+    initMultiBoothToggle,
     initCertificateOptionsToggle, 
     initTimePicker, 
     initEventModeSelector, 
@@ -135,6 +136,7 @@ async function initializeHostActivityPage() {
     initDateValidation();
     initEventModeSelector();
     initCheckinRulesToggle();
+    initMultiBoothToggle();
     initCertificateOptionsToggle();
     await initOrgSelector(orgId);
     initMapPicker();

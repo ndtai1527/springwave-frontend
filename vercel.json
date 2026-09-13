@@ -20,6 +20,7 @@
     { "source": "/about", "destination": "/about.html" },
     { "source": "/admin-host", "destination": "/admin-host.html" },
     { "source": "/my-tickets", "destination": "/my-tickets.html" },
+    { "source": "/kiosk", "destination": "/kiosk.html" },
     { "source": "/policy", "destination": "/policy.html" },
     { "source": "/privacy", "destination": "/policy.html" },
     { "source": "/terms", "destination": "/policy.html" }

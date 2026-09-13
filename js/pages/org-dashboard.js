@@ -17,6 +17,18 @@ import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { drawStyledQR } from "../lib/qr-styler.js";
 import { showConfirmDialog, showAlertDialog } from "../lib/modal.js";
 import { escapeHtml } from "../lib/sanitize.js";
+import QRCode from "qrcode";
+import {
+  getBoothsByEvent,
+  createBooth,
+  updateBooth,
+  deleteBooth,
+  saveEventKioskConfig,
+  saveBoothKioskConfig,
+  manualCheckinBooth,
+  getBoothLiveStats,
+  getExportMultiStationUrl
+} from "../api/booth.js";
 
 let currentOrgId = null;
 let currentOrgs = [];
@@ -3441,6 +3453,11 @@ function renderAttendanceTableRows(records, isPastEvent) {
       badge = '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:#fee2e2;color:#dc2626">Absent</span>';
     }
     const isCheckedIn = status === 'present' || status === 'late';
+    const visitedList = (r.stationCheckins || []).map(s => s.boothCode);
+    const visitedPills = visitedList.length > 0
+      ? `<div class="flex items-center gap-1 flex-wrap mt-1">${visitedList.map(c => `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60">${c}</span>`).join('')}</div>`
+      : '';
+
     return `
       <tr class="border-b border-[#ecedfa]">
         <td class="py-3.5 px-4">
@@ -3448,24 +3465,75 @@ function renderAttendanceTableRows(records, isPastEvent) {
             ${user.avatar
         ? `<img src="${user.avatar}" class="w-8 h-8 rounded-full object-cover" />`
         : `<div class="w-8 h-8 rounded-full bg-[#dae1ff] flex items-center justify-center text-primary text-xs font-bold">${(user.fullname?.[0] || "?").toUpperCase()}</div>`}
-            <span class="font-semibold">${user.fullname || "Unknown"}</span>
+            <div>
+              <span class="font-semibold block">${user.fullname || "Unknown"}</span>
+              ${visitedPills}
+            </div>
           </div>
         </td>
         <td class="py-3.5 px-4 text-[#64748b] hidden md:table-cell">${user.email || "—"}</td>
         <td class="py-3.5 px-4">${badge}</td>
         <td class="py-3.5 px-4 text-[#64748b] hidden sm:table-cell">${r.checkedInAt ? formatDate(r.checkedInAt) : "—"}</td>
         <td class="py-3.5 px-4 text-right">
-          ${isPastEvent
+          <div class="flex items-center justify-end gap-2">
+            <button class="btn-checkin-station-row text-xs py-1.5 px-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold border border-indigo-200 transition-all inline-flex items-center gap-1 cursor-pointer" data-att-id="${r._id}" title="Điểm danh vào trạm đang chọn">
+              <i class="fa-solid fa-store text-[10px]"></i>
+              <span>+ Trạm</span>
+            </button>
+            ${isPastEvent
         ? (isCheckedIn
           ? `<span class="text-sm text-slate-400 font-semibold cursor-not-allowed select-none">Mark Absent</span>`
           : `<span class="text-sm text-slate-400 font-semibold cursor-not-allowed select-none">Check In</span>`)
         : (isCheckedIn
           ? `<button class="manual-checkout-btn text-sm text-red-600 font-semibold hover:underline bg-transparent border-none cursor-pointer" data-user-id="${user._id || r._id}">Mark Absent</button>`
           : `<button class="manual-checkin-btn text-sm text-primary font-semibold hover:underline bg-transparent border-none cursor-pointer" data-user-id="${user._id || r._id}">Check In</button>`)}
+          </div>
         </td>
       </tr>
     `;
   }).join("");
+
+  tbody.querySelectorAll(".btn-checkin-station-row").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const attId = btn.dataset.attId;
+      const eventId = document.getElementById("attendance-event-select")?.value;
+      const stationSelect = document.getElementById("multibooth-active-station-select");
+      const boothCode = stationSelect?.value;
+
+      if (!boothCode) {
+        showAlertDialog({
+          titleKey: "common.notice",
+          defaultTitle: "Vui lòng chọn trạm",
+          messageKey: "org_dashboard.select_station_first",
+          defaultMessage: "Hãy chọn Trạm / Gian hàng bạn muốn điểm danh ở thanh trên trước khi bấm Check-in."
+        });
+        stationSelect?.focus();
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i>';
+      try {
+        await manualCheckinBooth(eventId, boothCode, attId);
+        showAlertDialog({
+          titleKey: "common.success",
+          defaultTitle: "Thành công",
+          messageKey: "org_dashboard.checkin_station_success",
+          defaultMessage: `Điểm danh sinh viên vào trạm ${boothCode} thành công!`
+        });
+        await loadAttendance(eventId);
+      } catch (err) {
+        showAlertDialog({
+          titleKey: "common.error",
+          defaultTitle: "Lỗi điểm danh",
+          messageKey: "org_dashboard.checkin_station_error",
+          defaultMessage: err.message || "Không thể điểm danh vào trạm"
+        });
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-store text-[10px]"></i><span>+ Trạm</span>';
+      }
+    });
+  });
 
   tbody.querySelectorAll(".manual-checkin-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
@@ -3573,6 +3641,24 @@ async function loadAttendance(eventId) {
         initBtn.classList.add("cursor-pointer");
         initBtn.title = "";
       }
+    }
+
+    // Multi-Booth / Kiosk Mode
+    const openMultiBoothBtn = document.getElementById("open-multibooth-mgr-btn");
+    const exportMultiBoothBtn = document.getElementById("export-multibooth-excel-btn");
+    const multiBoothBanner = document.getElementById("multibooth-checkin-banner");
+
+    if (event.hasMultiBooth) {
+      if (openMultiBoothBtn) openMultiBoothBtn.classList.remove("hidden");
+      if (exportMultiBoothBtn) exportMultiBoothBtn.classList.remove("hidden");
+      if (multiBoothBanner) multiBoothBanner.classList.remove("hidden");
+      if (typeof loadMultiBoothStations === "function") {
+        loadMultiBoothStations(eventId, event);
+      }
+    } else {
+      if (openMultiBoothBtn) openMultiBoothBtn.classList.add("hidden");
+      if (exportMultiBoothBtn) exportMultiBoothBtn.classList.add("hidden");
+      if (multiBoothBanner) multiBoothBanner.classList.add("hidden");
     }
 
     const hasAttendance = event.hasAttendance === true || event.hasAttendance === 'true';
@@ -8133,6 +8219,580 @@ async function loadOrgAnalytics() {
     console.error("Load Org Analytics error:", err);
   }
 }
+
+// =============================================================================
+// MULTI-STATION & KIOSK MANAGEMENT MODULE
+// =============================================================================
+let currentMultiBoothEvent = null;
+let currentBooths = [];
+let activeDesignerBooth = null;
+let activeDesignerConfig = null;
+
+const DEFAULT_KIOSK_TEMPLATE = {
+  isCustom: false,
+  bannerUrl: '',
+  logoUrl: '',
+  primaryColor: '#2563eb',
+  accentColor: '#10b981',
+  backgroundColor: '#090d16',
+  welcomeTitle: 'Chào mừng bạn đến với sự kiện!',
+  welcomeSubtitle: 'Vui lòng đưa thẻ sinh viên trước camera để điểm danh',
+  layout: {
+    logoPosition: 'top-left',
+    cameraBox: { position: 'center', borderColor: '#10b981', borderRadius: 24 },
+    showLiveCounter: true,
+    counterPosition: 'top-right',
+    sponsorQrUrl: '',
+    sponsorQrLabel: ''
+  },
+  feedbackMessage: {
+    title: 'Điểm danh thành công!',
+    subtitle: 'Chúc bạn có một trải nghiệm tuyệt vời!',
+    autoDismissSeconds: 1.2
+  },
+  soundTone: 'beep_high'
+};
+
+async function loadMultiBoothStations(eventId, event) {
+  currentMultiBoothEvent = event;
+  try {
+    const res = await getBoothsByEvent(eventId);
+    currentBooths = res.booths || [];
+
+    // 1. Populate Dropdown in Attendance section
+    const stationSelect = document.getElementById("multibooth-active-station-select");
+    const totalBadge = document.getElementById("multibooth-total-count-badge");
+    const summaryCount = document.getElementById("booth-summary-count");
+    const summaryCheckins = document.getElementById("booth-summary-checkins");
+
+    if (totalBadge) totalBadge.textContent = `${currentBooths.length} trạm`;
+
+    let totalCheckinCount = 0;
+    currentBooths.forEach(b => totalCheckinCount += (b.checkinCount || 0));
+
+    if (summaryCount) summaryCount.textContent = `${currentBooths.length} trạm hoạt động`;
+    if (summaryCheckins) summaryCheckins.textContent = `${totalCheckinCount} lượt quẹt thẻ`;
+
+    if (stationSelect) {
+      const prevVal = stationSelect.value;
+      stationSelect.innerHTML = `<option value="">-- Chọn Trạm / Gian Hàng (${currentBooths.length} trạm) --</option>` +
+        currentBooths.map(b => `
+          <option value="${b.boothCode}" ${prevVal === b.boothCode ? 'selected' : ''}>
+            ${escapeHtml(b.name)} [${b.boothCode}] • ${b.checkinCount || 0} lượt
+          </option>
+        `).join("");
+
+      if (!stationSelect.value && currentBooths.length > 0) {
+        stationSelect.value = currentBooths[0].boothCode;
+      }
+    }
+
+    // 2. Render Cards inside Booth Management Modal if open
+    renderBoothCards();
+  } catch (err) {
+    console.error("loadMultiBoothStations error:", err);
+  }
+}
+
+function renderBoothCards() {
+  const container = document.getElementById("booth-items-container");
+  if (!container) return;
+
+  if (currentBooths.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-12 px-4 text-slate-400">
+        <i class="fa-solid fa-store text-4xl mb-3 block text-slate-300"></i>
+        <p class="text-sm font-bold text-slate-600 mb-1">Chưa có trạm nào được thiết lập</p>
+        <p class="text-xs text-slate-400 max-w-sm mx-auto mb-4">Nhấn nút "Thêm Trạm" ở góc trên để tạo trạm đầu tiên (VD: Gian hàng FPT, Bàn Check-in Cổng A...).</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = currentBooths.map(b => {
+    const hasCustomLook = b.kioskConfig && b.kioskConfig.isCustom;
+    return `
+      <div class="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 hover:border-indigo-300 transition-all shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="flex items-start gap-3.5 min-w-0">
+          <div class="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex flex-col items-center justify-center shrink-0">
+            <span class="text-[9px] uppercase font-bold text-indigo-500 leading-none">MÃ TRẠM</span>
+            <span class="text-base font-black font-mono text-indigo-700 leading-tight">${b.boothCode}</span>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h4 class="text-sm sm:text-base font-extrabold text-slate-900 truncate">${escapeHtml(b.name)}</h4>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${b.isActive ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60' : 'bg-slate-100 text-slate-500'}">
+                ${b.isActive ? 'Hoạt động' : 'Tạm dừng'}
+              </span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${hasCustomLook ? 'bg-purple-50 text-purple-700 border border-purple-200/60' : 'bg-slate-50 text-slate-500 border border-slate-200/60'}">
+                ${hasCustomLook ? '🎨 Giao diện riêng' : 'Kế thừa Master'}
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+              <span><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>${escapeHtml(b.location || 'Chưa đặt vị trí')}</span>
+              <span>•</span>
+              <span class="font-semibold text-emerald-600 font-mono">${b.checkinCount || 0} lượt check-in</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+          <button type="button" class="btn-custom-booth-kiosk py-2 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-purple-200/60" data-booth-id="${b._id}" title="Tùy biến giao diện Kiosk riêng cho trạm này">
+            <i class="fa-solid fa-palette text-xs"></i>
+            <span>Tùy Biến Kiosk</span>
+          </button>
+          <button type="button" class="btn-print-booth-card py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer" data-booth-id="${b._id}" title="In thẻ để bàn kèm mã QR">
+            <i class="fa-solid fa-print text-xs"></i>
+            <span>In Thẻ Bàn</span>
+          </button>
+          <button type="button" class="btn-edit-booth-item w-8 h-8 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-900 flex items-center justify-center cursor-pointer transition-colors" data-booth-id="${b._id}">
+            <i class="fa-solid fa-pen text-xs"></i>
+          </button>
+          <button type="button" class="btn-delete-booth-item w-8 h-8 rounded-lg bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer transition-colors" data-booth-id="${b._id}">
+            <i class="fa-solid fa-trash-can text-xs"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Bind Actions inside cards
+  container.querySelectorAll(".btn-custom-booth-kiosk").forEach(btn => {
+    btn.onclick = () => {
+      const bId = btn.dataset.boothId;
+      const booth = currentBooths.find(b => b._id === bId);
+      if (booth) openKioskDesignerModal(booth);
+    };
+  });
+
+  container.querySelectorAll(".btn-print-booth-card").forEach(btn => {
+    btn.onclick = () => {
+      const bId = btn.dataset.boothId;
+      const booth = currentBooths.find(b => b._id === bId);
+      if (booth) openSetupCardModal(booth);
+    };
+  });
+
+  container.querySelectorAll(".btn-edit-booth-item").forEach(btn => {
+    btn.onclick = () => {
+      const bId = btn.dataset.boothId;
+      const booth = currentBooths.find(b => b._id === bId);
+      if (booth) openCreateOrEditBoothModal(booth);
+    };
+  });
+
+  container.querySelectorAll(".btn-delete-booth-item").forEach(btn => {
+    btn.onclick = async () => {
+      const bId = btn.dataset.boothId;
+      const booth = currentBooths.find(b => b._id === bId);
+      if (!booth) return;
+
+      const confirmed = await showConfirmDialog({
+        titleKey: "common.confirm_title",
+        defaultTitle: "Xác nhận xóa trạm",
+        messageKey: "org_dashboard.delete_booth_confirm",
+        defaultMessage: `Bạn có chắc chắn muốn xóa trạm "${booth.name}" (Mã: ${booth.boothCode})? Lịch sử check-in của trạm này vẫn được lưu trong hồ sơ sinh viên.`
+      });
+
+      if (confirmed) {
+        try {
+          await deleteBooth(bId);
+          await loadMultiBoothStations(currentMultiBoothEvent._id, currentMultiBoothEvent);
+        } catch (err) {
+          alert(err.message || "Xóa trạm thất bại");
+        }
+      }
+    };
+  });
+}
+
+function openCreateOrEditBoothModal(booth = null) {
+  const modal = document.getElementById("create-booth-modal");
+  const title = document.getElementById("create-booth-modal-title");
+  const editId = document.getElementById("edit-booth-id");
+  const nameInput = document.getElementById("booth-name-input");
+  const locInput = document.getElementById("booth-location-input");
+  const codeInput = document.getElementById("booth-custom-code-input");
+  const pinInput = document.getElementById("booth-pincode-input");
+  const errorMsg = document.getElementById("create-booth-error-msg");
+
+  if (!modal) return;
+  errorMsg.textContent = "";
+
+  if (booth) {
+    title.textContent = "Chỉnh Sửa Trạm / Gian Hàng";
+    editId.value = booth._id;
+    nameInput.value = booth.name || "";
+    locInput.value = booth.location || "";
+    codeInput.value = booth.boothCode || "";
+    pinInput.value = booth.pinCode || "1234";
+  } else {
+    title.textContent = "Thêm Trạm / Gian Hàng Mới";
+    editId.value = "";
+    nameInput.value = "";
+    locInput.value = "";
+    codeInput.value = "";
+    pinInput.value = "1234";
+  }
+
+  modal.classList.remove("hidden");
+  setTimeout(() => nameInput.focus(), 80);
+}
+
+async function openSetupCardModal(booth) {
+  const modal = document.getElementById("booth-setup-card-modal");
+  const nameEl = document.getElementById("print-booth-name");
+  const eventEl = document.getElementById("print-event-title");
+  const codeEl = document.getElementById("print-booth-code");
+  const qrImg = document.getElementById("print-qr-img");
+
+  if (!modal || !booth) return;
+
+  nameEl.textContent = booth.name;
+  eventEl.textContent = currentMultiBoothEvent?.title || "Sự kiện SpringWave";
+  codeEl.textContent = booth.boothCode;
+
+  try {
+    const qrDataUrl = await QRCode.toDataURL(`https://springwave.io.vn/kiosk?code=${booth.boothCode}`, {
+      width: 280,
+      margin: 1,
+      color: { dark: '#1e1b4b', light: '#ffffff' }
+    });
+    qrImg.src = qrDataUrl;
+  } catch (e) {
+    console.error("Generate setup QR failed:", e);
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function openKioskDesignerModal(booth = null) {
+  activeDesignerBooth = booth;
+  const modal = document.getElementById("kiosk-designer-modal");
+  const targetBadge = document.getElementById("designer-target-badge");
+  const overrideBox = document.getElementById("designer-override-toggle-box");
+  const isCustomToggle = document.getElementById("designer-is-custom-toggle");
+
+  if (!modal) return;
+
+  if (booth) {
+    targetBadge.textContent = `Trạm: ${booth.name} (${booth.boothCode})`;
+    targetBadge.className = "px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-400/30";
+    overrideBox.classList.remove("hidden");
+
+    const hasCustom = booth.kioskConfig && booth.kioskConfig.isCustom;
+    isCustomToggle.checked = Boolean(hasCustom);
+
+    activeDesignerConfig = JSON.parse(JSON.stringify(
+      (hasCustom ? booth.kioskConfig : currentMultiBoothEvent?.kioskConfig) || DEFAULT_KIOSK_TEMPLATE
+    ));
+  } else {
+    targetBadge.textContent = "Master Theme (Chung cho Sự Kiện)";
+    targetBadge.className = "px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30";
+    overrideBox.classList.add("hidden");
+
+    activeDesignerConfig = JSON.parse(JSON.stringify(
+      currentMultiBoothEvent?.kioskConfig || DEFAULT_KIOSK_TEMPLATE
+    ));
+  }
+
+  syncDesignerInputsFromConfig();
+  updateArtboardLive();
+  modal.classList.remove("hidden");
+}
+
+function syncDesignerInputsFromConfig() {
+  const cfg = activeDesignerConfig || DEFAULT_KIOSK_TEMPLATE;
+  const colorPrimary = document.getElementById("designer-color-primary");
+  const colorPrimaryHex = document.getElementById("designer-color-primary-hex");
+  const colorAccent = document.getElementById("designer-color-accent");
+  const colorAccentHex = document.getElementById("designer-color-accent-hex");
+  const colorBg = document.getElementById("designer-color-bg");
+  const colorBgHex = document.getElementById("designer-color-bg-hex");
+  const logoUrl = document.getElementById("designer-logo-url");
+  const bannerUrl = document.getElementById("designer-banner-url");
+  const titleInput = document.getElementById("designer-welcome-title");
+  const subInput = document.getElementById("designer-welcome-subtitle");
+  const sponsorQr = document.getElementById("designer-sponsor-qr");
+  const sponsorLabel = document.getElementById("designer-sponsor-label");
+  const soundTone = document.getElementById("designer-sound-tone");
+
+  if (colorPrimary) {
+    colorPrimary.value = cfg.primaryColor || "#2563eb";
+    colorPrimaryHex.textContent = colorPrimary.value;
+  }
+  if (colorAccent) {
+    colorAccent.value = cfg.accentColor || "#10b981";
+    colorAccentHex.textContent = colorAccent.value;
+  }
+  if (colorBg) {
+    colorBg.value = cfg.backgroundColor || "#090d16";
+    colorBgHex.textContent = colorBg.value;
+  }
+
+  if (logoUrl) logoUrl.value = cfg.logoUrl || "";
+  if (bannerUrl) bannerUrl.value = cfg.bannerUrl || "";
+  if (titleInput) titleInput.value = cfg.welcomeTitle || (activeDesignerBooth ? `Gian Hàng ${activeDesignerBooth.name}` : "Chào mừng đến với sự kiện!");
+  if (subInput) subInput.value = cfg.welcomeSubtitle || "Vui lòng quẹt thẻ để nhận quà và ghi nhận tham quan!";
+  if (sponsorQr) sponsorQr.value = cfg.layout?.sponsorQrUrl || "";
+  if (sponsorLabel) sponsorLabel.value = cfg.layout?.sponsorQrLabel || "";
+  if (soundTone) soundTone.value = cfg.soundTone || "beep_high";
+}
+
+function updateArtboardLive() {
+  const artboard = document.getElementById("designer-artboard");
+  const titleEl = document.getElementById("artboard-welcome-title");
+  const subEl = document.getElementById("artboard-welcome-subtitle");
+  const boothTitle = document.getElementById("artboard-booth-title");
+  const logoImg = document.getElementById("artboard-logo-img");
+  const logoIcon = document.getElementById("artboard-logo-icon");
+  const qrCard = document.getElementById("artboard-qr-card");
+  const qrLabel = document.getElementById("artboard-qr-label");
+
+  const colorPrimary = document.getElementById("designer-color-primary")?.value || "#2563eb";
+  const colorBg = document.getElementById("designer-color-bg")?.value || "#090d16";
+  const logoVal = document.getElementById("designer-logo-url")?.value?.trim();
+  const bannerVal = document.getElementById("designer-banner-url")?.value?.trim();
+  const titleVal = document.getElementById("designer-welcome-title")?.value?.trim();
+  const subVal = document.getElementById("designer-welcome-subtitle")?.value?.trim();
+  const qrVal = document.getElementById("designer-sponsor-qr")?.value?.trim();
+  const qrLabelVal = document.getElementById("designer-sponsor-label")?.value?.trim();
+
+  if (artboard) {
+    artboard.style.backgroundColor = colorBg;
+    if (bannerVal) {
+      artboard.style.backgroundImage = `linear-gradient(rgba(9, 13, 22, 0.8), rgba(9, 13, 22, 0.8)), url('${bannerVal}')`;
+      artboard.style.backgroundSize = "cover";
+      artboard.style.backgroundPosition = "center";
+    } else {
+      artboard.style.backgroundImage = "none";
+    }
+  }
+
+  if (titleEl) titleEl.textContent = titleVal || "Điểm Danh & Khám Phá";
+  if (subEl) subEl.textContent = subVal || "Vui lòng quẹt thẻ sinh viên để nhận quà!";
+  if (boothTitle) boothTitle.textContent = activeDesignerBooth ? activeDesignerBooth.name : (currentMultiBoothEvent?.title || "Gian Hàng SpringWave");
+
+  if (logoVal) {
+    logoImg.src = logoVal;
+    logoImg.classList.remove("hidden");
+    logoIcon.classList.add("hidden");
+  } else {
+    logoImg.classList.add("hidden");
+    logoIcon.classList.remove("hidden");
+  }
+
+  if (qrVal) {
+    qrCard.classList.remove("hidden");
+    qrCard.classList.add("flex");
+    if (qrLabel) qrLabel.textContent = qrLabelVal || "Quét mã nhận cẩm nang";
+  } else {
+    qrCard.classList.add("hidden");
+  }
+}
+
+function initMultiBoothManager() {
+  // 1. Open Booth Mgr Modal
+  document.getElementById("open-multibooth-mgr-btn")?.addEventListener("click", () => {
+    const titleEl = document.getElementById("booth-mgr-event-title");
+    if (titleEl && currentMultiBoothEvent) {
+      titleEl.textContent = `Quản Lý Đa Trạm - ${currentMultiBoothEvent.title}`;
+    }
+    renderBoothCards();
+    document.getElementById("booth-management-modal")?.classList.remove("hidden");
+  });
+
+  document.getElementById("btn-close-booth-mgr")?.addEventListener("click", () => {
+    document.getElementById("booth-management-modal")?.classList.add("hidden");
+  });
+
+  // 2. Open Master Kiosk Designer
+  document.getElementById("btn-open-master-kiosk-designer")?.addEventListener("click", () => {
+    openKioskDesignerModal(null);
+  });
+
+  // 3. Add New Booth Button
+  document.getElementById("btn-add-new-booth")?.addEventListener("click", () => {
+    openCreateOrEditBoothModal(null);
+  });
+
+  document.getElementById("btn-close-create-booth")?.addEventListener("click", () => {
+    document.getElementById("create-booth-modal")?.classList.add("hidden");
+  });
+  document.getElementById("btn-cancel-create-booth")?.addEventListener("click", () => {
+    document.getElementById("create-booth-modal")?.classList.add("hidden");
+  });
+
+  // 4. Submit Create/Edit Booth Form
+  document.getElementById("create-booth-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const eventId = currentMultiBoothEvent?._id;
+    if (!eventId) return;
+
+    const editId = document.getElementById("edit-booth-id").value;
+    const name = document.getElementById("booth-name-input").value.trim();
+    const location = document.getElementById("booth-location-input").value.trim();
+    const customCode = document.getElementById("booth-custom-code-input").value.trim();
+    const pinCode = document.getElementById("booth-pincode-input").value.trim();
+    const errorMsg = document.getElementById("create-booth-error-msg");
+
+    errorMsg.textContent = "";
+    const submitBtn = document.getElementById("btn-save-booth");
+    submitBtn.disabled = true;
+
+    try {
+      if (editId) {
+        await updateBooth(editId, { name, location, customCode, pinCode });
+      } else {
+        await createBooth(eventId, { name, location, customCode, pinCode });
+      }
+
+      document.getElementById("create-booth-modal")?.classList.add("hidden");
+      await loadMultiBoothStations(eventId, currentMultiBoothEvent);
+    } catch (err) {
+      errorMsg.textContent = err.message || "Lỗi lưu trạm";
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  // 5. Setup Card Modal Controls
+  document.getElementById("btn-close-setup-card")?.addEventListener("click", () => {
+    document.getElementById("booth-setup-card-modal")?.classList.add("hidden");
+  });
+  document.getElementById("btn-print-setup-card")?.addEventListener("click", () => {
+    window.print();
+  });
+
+  // 6. Open Kiosk in New Tab for Active Station
+  document.getElementById("btn-open-kiosk-for-active-station")?.addEventListener("click", () => {
+    const stationSelect = document.getElementById("multibooth-active-station-select");
+    const code = stationSelect?.value;
+    if (code) {
+      window.open(`/kiosk.html`, "_blank");
+    } else {
+      window.open(`/kiosk.html`, "_blank");
+    }
+  });
+
+  // 7. Export Excel Button Handlers
+  const triggerExcelExport = () => {
+    if (!currentMultiBoothEvent?._id) return;
+    const url = getExportMultiStationUrl(currentMultiBoothEvent._id);
+    window.open(url, "_blank");
+  };
+  document.getElementById("export-multibooth-excel-btn")?.addEventListener("click", triggerExcelExport);
+  document.getElementById("btn-download-excel-from-modal")?.addEventListener("click", triggerExcelExport);
+
+  // 8. Kiosk Designer Controls Live Binding
+  const colorInputs = ["designer-color-primary", "designer-color-accent", "designer-color-bg"];
+  colorInputs.forEach(id => {
+    const input = document.getElementById(id);
+    const hexSpan = document.getElementById(`${id}-hex`);
+    input?.addEventListener("input", () => {
+      if (hexSpan) hexSpan.textContent = input.value;
+      updateArtboardLive();
+    });
+  });
+
+  const textInputs = ["designer-logo-url", "designer-banner-url", "designer-welcome-title", "designer-welcome-subtitle", "designer-sponsor-qr", "designer-sponsor-label"];
+  textInputs.forEach(id => {
+    document.getElementById(id)?.addEventListener("input", updateArtboardLive);
+  });
+
+  // Preset Buttons
+  document.querySelectorAll(".preset-theme-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const primary = btn.dataset.primary;
+      const accent = btn.dataset.accent;
+      const bg = btn.dataset.bg;
+
+      const pInput = document.getElementById("designer-color-primary");
+      const aInput = document.getElementById("designer-color-accent");
+      const bInput = document.getElementById("designer-color-bg");
+
+      if (pInput) { pInput.value = primary; document.getElementById("designer-color-primary-hex").textContent = primary; }
+      if (aInput) { aInput.value = accent; document.getElementById("designer-color-accent-hex").textContent = accent; }
+      if (bInput) { bInput.value = bg; document.getElementById("designer-color-bg-hex").textContent = bg; }
+
+      updateArtboardLive();
+    });
+  });
+
+  // Reset Designer to Defaults
+  document.getElementById("btn-reset-kiosk-designer")?.addEventListener("click", () => {
+    activeDesignerConfig = JSON.parse(JSON.stringify(DEFAULT_KIOSK_TEMPLATE));
+    syncDesignerInputsFromConfig();
+    updateArtboardLive();
+  });
+
+  // Close Designer Modal
+  document.getElementById("btn-close-kiosk-designer")?.addEventListener("click", () => {
+    document.getElementById("kiosk-designer-modal")?.classList.add("hidden");
+  });
+
+  // Save Kiosk Designer
+  document.getElementById("btn-save-kiosk-designer")?.addEventListener("click", async () => {
+    const saveBtn = document.getElementById("btn-save-kiosk-designer");
+    saveBtn.disabled = true;
+
+    const isCustom = activeDesignerBooth
+      ? document.getElementById("designer-is-custom-toggle")?.checked ?? true
+      : true;
+
+    const newConfig = {
+      isCustom,
+      primaryColor: document.getElementById("designer-color-primary")?.value || "#2563eb",
+      accentColor: document.getElementById("designer-color-accent")?.value || "#10b981",
+      backgroundColor: document.getElementById("designer-color-bg")?.value || "#090d16",
+      logoUrl: document.getElementById("designer-logo-url")?.value?.trim() || "",
+      bannerUrl: document.getElementById("designer-banner-url")?.value?.trim() || "",
+      welcomeTitle: document.getElementById("designer-welcome-title")?.value?.trim() || "",
+      welcomeSubtitle: document.getElementById("designer-welcome-subtitle")?.value?.trim() || "",
+      soundTone: document.getElementById("designer-sound-tone")?.value || "beep_high",
+      layout: {
+        logoPosition: "top-left",
+        cameraBox: { position: "center", borderColor: document.getElementById("designer-color-accent")?.value || "#10b981", borderRadius: 24 },
+        showLiveCounter: true,
+        counterPosition: "top-right",
+        sponsorQrUrl: document.getElementById("designer-sponsor-qr")?.value?.trim() || "",
+        sponsorQrLabel: document.getElementById("designer-sponsor-label")?.value?.trim() || ""
+      }
+    };
+
+    try {
+      if (activeDesignerBooth) {
+        await saveBoothKioskConfig(activeDesignerBooth._id, newConfig);
+        showAlertDialog({
+          titleKey: "common.success",
+          defaultTitle: "Thành công",
+          messageKey: "org_dashboard.kiosk_save_success",
+          defaultMessage: `Đã lưu giao diện Kiosk riêng cho trạm ${activeDesignerBooth.name}!`
+        });
+      } else {
+        await saveEventKioskConfig(currentMultiBoothEvent._id, newConfig);
+        currentMultiBoothEvent.kioskConfig = newConfig;
+        showAlertDialog({
+          titleKey: "common.success",
+          defaultTitle: "Thành công",
+          messageKey: "org_dashboard.kiosk_master_save_success",
+          defaultMessage: "Đã lưu Master Theme Kiosk chung cho sự kiện!"
+        });
+      }
+
+      document.getElementById("kiosk-designer-modal")?.classList.add("hidden");
+      await loadMultiBoothStations(currentMultiBoothEvent._id, currentMultiBoothEvent);
+    } catch (err) {
+      alert(err.message || "Lỗi lưu giao diện Kiosk");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initMultiBoothManager();
+});
 
 window.addEventListener("language-changed", () => {
   applyTranslation();

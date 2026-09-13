@@ -275,6 +275,15 @@ export function initCheckinRulesToggle() {
     });
 }
 
+export function initMultiBoothToggle() {
+    const checkbox = document.getElementById("hasMultiBooth");
+    const fields = document.getElementById("multibooth-fields");
+    if (!checkbox || !fields) return;
+    checkbox.addEventListener("change", () => {
+        fields.classList.toggle("hidden", !checkbox.checked);
+    });
+}
+
 export function initCertificateOptionsToggle() {
     const checkbox = document.getElementById("hasCertificate");
     const options = document.getElementById("cert-bg-options");
@@ -890,6 +899,22 @@ export async function initEditMode(eventId) {
       if (expiredMinEl) expiredMinEl.value = event.expiredCheckinMinutes || 0;
     }
 
+    // Multi-Booth / Kiosk Mode
+    const hasMultiBoothEl = document.getElementById("hasMultiBooth");
+    const multiboothFields = document.getElementById("multibooth-fields");
+    if (hasMultiBoothEl) {
+      hasMultiBoothEl.checked = event.hasMultiBooth === true || event.hasMultiBooth === 'true';
+      if (multiboothFields) multiboothFields.classList.toggle("hidden", !hasMultiBoothEl.checked);
+      if (event.multiBoothConfig) {
+        const bType = document.getElementById("boothTypeLabel");
+        const minB = document.getElementById("minBoothsRequired");
+        const reqP = document.getElementById("requireBoothPhoto");
+        if (bType && event.multiBoothConfig.boothTypeLabel) bType.value = event.multiBoothConfig.boothTypeLabel;
+        if (minB && event.multiBoothConfig.minBoothsRequired !== undefined) minB.value = event.multiBoothConfig.minBoothsRequired;
+        if (reqP && event.multiBoothConfig.requirePhoto !== undefined) reqP.checked = Boolean(event.multiBoothConfig.requirePhoto);
+      }
+    }
+
     // Organization
     if (event.organization) {
       const orgId = typeof event.organization === 'object' ? (event.organization._id || event.organization.id) : event.organization;
@@ -1202,6 +1227,16 @@ export function initFormSubmit(orgId, onSuccess) {
         } else {
             formData.append("lateCheckinMinutes", "0");
             formData.append("expiredCheckinMinutes", "0");
+        }
+        const hasMultiBooth = document.getElementById("hasMultiBooth")?.checked;
+        formData.append("hasMultiBooth", hasMultiBooth ? "true" : "false");
+        if (hasMultiBooth) {
+            const multiBoothConfig = {
+                boothTypeLabel: document.getElementById("boothTypeLabel")?.value || "booth",
+                minBoothsRequired: parseInt(document.getElementById("minBoothsRequired")?.value, 10) || 0,
+                requirePhoto: document.getElementById("requireBoothPhoto")?.checked ?? true
+            };
+            formData.append("multiBoothConfig", JSON.stringify(multiBoothConfig));
         }
         const lat = document.getElementById("locationLat")?.value;
         const lng = document.getElementById("locationLng")?.value;

@@ -532,12 +532,46 @@
                 <button id="scan-qr-btn" class="py-2.5 px-4 sm:px-5 rounded-full bg-primary text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-none cursor-pointer spring-ease hover:bg-primary/90 active:scale-95 shadow-xs w-full sm:w-auto">
                     <i class="fa-solid fa-camera text-xs"></i> <span>Scan QR Code / Barcode</span>
                 </button>
+                <button id="open-multibooth-mgr-btn" class="hidden py-2.5 px-4 sm:px-5 rounded-full bg-indigo-600 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-none cursor-pointer spring-ease hover:bg-indigo-700 active:scale-95 shadow-xs w-full sm:w-auto">
+                    <i class="fa-solid fa-store text-xs"></i> <span data-i18n="org_dashboard.open_multibooth_mgr">Quản Lý Đa Trạm & Kiosk</span>
+                </button>
+                <button id="export-multibooth-excel-btn" class="hidden py-2.5 px-4 sm:px-5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 cursor-pointer spring-ease hover:bg-indigo-100 active:scale-95 shadow-2xs w-full sm:w-auto">
+                    <i class="fa-solid fa-file-excel text-xs"></i> <span data-i18n="org_dashboard.export_multibooth_excel">Xuất Excel Đa Trạm</span>
+                </button>
                 <button id="open-online-checkin-modal-btn" class="hidden py-2.5 px-4 sm:px-5 rounded-full bg-emerald-600 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border-none cursor-pointer spring-ease hover:bg-emerald-700 active:scale-95 shadow-xs w-full sm:w-auto">
                     <i class="fa-solid fa-key text-xs"></i> <span data-i18n="org_dashboard.online_checkin_btn">Cổng Điểm Danh Online (PIN)</span>
                 </button>
                 <button id="init-attendance-btn" class="py-2.5 px-4 sm:px-5 rounded-full border border-slate-200 bg-white text-slate-600 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 cursor-pointer spring-ease hover:bg-slate-50 active:scale-95 shadow-2xs w-full sm:w-auto">
                     <i class="fa-solid fa-rotate text-xs"></i> <span>Init Attendance</span>
                 </button>
+            </div>
+
+            <!-- Multi-Booth Quick Bar (Hiển thị khi sự kiện có hasMultiBooth) -->
+            <div id="multibooth-checkin-banner" class="hidden mb-5 p-4 rounded-2xl bg-gradient-to-r from-indigo-50/90 via-blue-50/80 to-purple-50/70 border border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                        <i class="fa-solid fa-store"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h4 class="text-xs sm:text-sm font-extrabold text-indigo-950">Chế Độ Điểm Danh Đa Trạm</h4>
+                            <span id="multibooth-total-count-badge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white">0 trạm</span>
+                        </div>
+                        <p class="text-[11px] sm:text-xs text-indigo-700/80 mt-0.5" data-i18n="org_dashboard.booth_manual_checkin_hint">Bấm [+ Trạm] ở từng sinh viên để điểm danh trực tiếp vào trạm này.</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+                    <div class="relative w-full sm:w-auto">
+                        <label class="block text-[10px] uppercase font-bold text-indigo-800 mb-1" data-i18n="org_dashboard.booth_active_station_label">Trạm Check-in đang chọn:</label>
+                        <select id="multibooth-active-station-select" class="w-full sm:w-[260px] px-3 py-2 rounded-xl bg-white border border-indigo-200 text-xs font-bold text-indigo-950 outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-2xs cursor-pointer">
+                            <option value="">-- Chọn Trạm / Gian Hàng --</option>
+                        </select>
+                    </div>
+                    <button id="btn-open-kiosk-for-active-station" class="self-end py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer shrink-0 min-h-[36px]" title="Mở Kiosk cho trạm này">
+                        <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i> <span>Mở Kiosk</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Attendance Table Card -->
@@ -2141,6 +2175,378 @@
                             <i class="fa-solid fa-stop text-xs"></i>
                             <span data-i18n="org_dashboard.close_gate_btn">Đóng Cổng Điểm Danh Ngay</span>
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- MULTI-STATION MODAL 1: BOOTH MANAGEMENT COMMAND CENTER                    -->
+    <!-- ========================================================================= -->
+    <div id="booth-management-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/75 backdrop-blur-sm hidden">
+        <div class="relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl bg-white shadow-2xl border border-slate-100 overflow-hidden">
+            <!-- Header -->
+            <div class="px-5 sm:px-7 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 shrink-0">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                        <i class="fa-solid fa-store"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <h3 class="text-base sm:text-lg font-extrabold text-slate-900 truncate tracking-tight" id="booth-mgr-event-title">
+                            Quản Lý Đa Trạm / Kiosk
+                        </h3>
+                        <p class="text-xs text-slate-500 truncate">Thiết lập danh sách trạm, mã 6 số và tùy biến giao diện Kiosk</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" id="btn-open-master-kiosk-designer" class="py-2 px-3 sm:px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer">
+                        <i class="fa-solid fa-wand-magic-sparkles text-indigo-600"></i>
+                        <span class="hidden sm:inline">Theme Kiosk Chung</span>
+                    </button>
+                    <button type="button" id="btn-add-new-booth" class="py-2 px-3 sm:px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer">
+                        <i class="fa-solid fa-plus text-xs"></i>
+                        <span>Thêm Trạm</span>
+                    </button>
+                    <button type="button" id="btn-close-booth-mgr" class="w-9 h-9 rounded-xl bg-white hover:bg-slate-100 text-slate-400 hover:text-slate-700 border border-slate-200 flex items-center justify-center transition-all cursor-pointer ml-1">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Body List -->
+            <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3" id="booth-items-container">
+                <div class="text-center py-12 text-slate-400 text-xs">Đang tải danh sách các trạm...</div>
+            </div>
+
+            <!-- Footer Stats & Export -->
+            <div class="px-5 sm:px-7 py-3.5 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 text-xs text-slate-500">
+                <div class="flex items-center gap-3">
+                    <span id="booth-summary-count" class="font-bold text-slate-700">0 trạm hoạt động</span>
+                    <span class="text-slate-300">•</span>
+                    <span id="booth-summary-checkins" class="font-semibold text-emerald-600">0 lượt quẹt thẻ</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" id="btn-download-excel-from-modal" class="py-1.5 px-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs">
+                        <i class="fa-solid fa-file-excel text-emerald-600"></i>
+                        <span>Xuất Excel Đa Trạm</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- MULTI-STATION MODAL 2: CREATE / EDIT BOOTH DIALOG                         -->
+    <!-- ========================================================================= -->
+    <div id="create-booth-modal" class="fixed inset-0 z-55 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm hidden">
+        <div class="relative w-full max-w-md rounded-3xl bg-white shadow-2xl border border-slate-100 p-6 sm:p-7 text-left">
+            <div class="flex items-center justify-between mb-4">
+                <h4 class="text-base font-extrabold text-slate-900" id="create-booth-modal-title">Thêm Trạm / Gian Hàng Mới</h4>
+                <button type="button" id="btn-close-create-booth" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+            </div>
+
+            <form id="create-booth-form" onsubmit="return false;" class="space-y-4">
+                <input type="hidden" id="edit-booth-id" value="" />
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Tên Trạm / Gian Hàng <span class="text-rose-500">*</span></label>
+                    <input type="text" id="booth-name-input" placeholder="VD: FPT Software, VNG Games, Bàn Check-in Cổng A" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none text-xs sm:text-sm font-semibold text-slate-900 transition-all" required />
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Vị trí bàn / Khu vực</label>
+                    <input type="text" id="booth-location-input" placeholder="VD: Bàn A1 - Sảnh Hội Trường A" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none text-xs sm:text-sm text-slate-900 transition-all" />
+                </div>
+
+                <div class="p-3.5 rounded-2xl bg-indigo-50/60 border border-indigo-100">
+                    <label class="block text-xs font-bold text-indigo-950 mb-1">Mã Trạm 6 Ký Tự (Kiosk Activation Code)</label>
+                    <p class="text-[11px] text-indigo-700/80 mb-2">Để trống để hệ thống tự sinh ngẫu nhiên (VD: <span class="font-mono font-bold text-indigo-600">A8X2K9</span>) hoặc nhập mã custom 6 ký tự (VD: <span class="font-mono font-bold text-indigo-600">FPT001</span>).</p>
+                    <input type="text" id="booth-custom-code-input" maxlength="6" placeholder="Tự sinh ngẫu nhiên hoặc gõ mã custom" class="w-full px-3.5 py-2 rounded-xl border border-indigo-200 bg-white uppercase font-mono font-bold text-xs sm:text-sm text-indigo-900 focus:border-indigo-500 outline-none tracking-wider" />
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Mã PIN Thoát Kiosk (4 số)</label>
+                    <input type="text" id="booth-pincode-input" maxlength="4" value="1234" placeholder="Mặc định 1234" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none font-mono text-xs text-slate-900" />
+                </div>
+
+                <div id="create-booth-error-msg" class="text-xs text-rose-500 font-medium min-h-[16px]"></div>
+
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" id="btn-cancel-create-booth" class="py-2.5 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-bold cursor-pointer">
+                        Hủy
+                    </button>
+                    <button type="submit" id="btn-save-booth" class="py-2.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition-all cursor-pointer">
+                        Lưu Trạm
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- MULTI-STATION MODAL 3: PRINTABLE SETUP CARD WITH QR CODE                  -->
+    <!-- ========================================================================= -->
+    <div id="booth-setup-card-modal" class="fixed inset-0 z-55 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm hidden">
+        <div class="relative w-full max-w-md rounded-3xl bg-white shadow-2xl border border-slate-100 p-6 sm:p-8 text-center">
+            <button type="button" id="btn-close-setup-card" class="absolute top-4 right-4 w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer">
+                <i class="fa-solid fa-xmark text-xs"></i>
+            </button>
+
+            <div class="p-6 rounded-2xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 mb-5" id="printable-card-content">
+                <span class="inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-600 text-white mb-2">
+                    BÀN ĐIỂM DANH KIOSK
+                </span>
+                <h3 class="text-xl font-extrabold text-slate-900 tracking-tight" id="print-booth-name">Gian Hàng FPT Software</h3>
+                <p class="text-xs text-slate-500 mt-0.5" id="print-event-title">Sự kiện Ngày Hội Hướng Nghiệp</p>
+
+                <!-- Big 6-character code -->
+                <div class="my-4 py-3 px-4 rounded-2xl bg-white border border-indigo-200 shadow-sm inline-block">
+                    <p class="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Mã Kích Hoạt Kiosk (6 Ký Tự)</p>
+                    <p class="text-3xl sm:text-4xl font-black font-mono tracking-[0.25em] text-indigo-600" id="print-booth-code">FPT001</p>
+                </div>
+
+                <!-- Setup QR -->
+                <div class="w-36 h-36 mx-auto bg-white rounded-2xl p-2 border border-slate-200 shadow-sm flex items-center justify-center mb-2">
+                    <img id="print-qr-img" src="" alt="Setup QR" class="w-full h-full object-contain" />
+                </div>
+                <p class="text-[11px] text-slate-500">Mở trình duyệt truy cập: <strong class="text-slate-800">springwave.io.vn/kiosk</strong><br/>và nhập mã 6 ký tự trên để vào Kiosk.</p>
+            </div>
+
+            <div class="flex items-center justify-center gap-2">
+                <button type="button" id="btn-print-setup-card" class="py-2.5 px-5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer">
+                    <i class="fa-solid fa-print"></i>
+                    <span>In Thẻ Đặt Bàn</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- MULTI-STATION MODAL 4: KIOSK CANVA DESIGNER (TÙY BIẾN GIAO DIỆN KIOSK)     -->
+    <!-- ========================================================================= -->
+    <div id="kiosk-designer-modal" class="fixed inset-0 z-55 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md hidden">
+        <div class="relative w-full max-w-6xl h-[94vh] flex flex-col rounded-3xl bg-slate-900 border border-white/10 shadow-2xl overflow-hidden text-white">
+            
+            <!-- Top Toolbar -->
+            <div class="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-slate-950/60 shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 text-white flex items-center justify-center shadow-md">
+                        <i class="fa-solid fa-palette text-sm"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm sm:text-base font-extrabold tracking-tight">Kiosk Visual Designer</h3>
+                            <span id="designer-target-badge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                                Master Theme
+                            </span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Tùy biến nhận diện thương hiệu, màu sắc, lời chào và layout camera</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button type="button" id="btn-reset-kiosk-designer" class="py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold transition-all cursor-pointer">
+                        Khôi Phục Mặc Định
+                    </button>
+                    <button type="button" id="btn-save-kiosk-designer" class="py-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all cursor-pointer flex items-center gap-1.5">
+                        <i class="fa-solid fa-floppy-disk text-xs"></i>
+                        <span>Lưu Giao Diện</span>
+                    </button>
+                    <button type="button" id="btn-close-kiosk-designer" class="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer ml-1">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Split Body: Left Controls vs Right Live Preview -->
+            <div class="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+                
+                <!-- LEFT PANEL: CONTROLS & THEME TOKENS -->
+                <div class="w-full lg:w-[380px] p-5 overflow-y-auto border-b lg:border-b-0 lg:border-r border-white/10 space-y-5 bg-slate-950/40 text-xs shrink-0">
+                    
+                    <!-- Mode override toggle (nếu đang chỉnh sửa trạm cụ thể) -->
+                    <div id="designer-override-toggle-box" class="p-3 rounded-2xl bg-blue-950/40 border border-blue-500/30 hidden">
+                        <label class="flex items-center justify-between cursor-pointer select-none">
+                            <span class="font-bold text-blue-200">Tùy biến riêng cho trạm này</span>
+                            <input type="checkbox" id="designer-is-custom-toggle" class="w-4 h-4 rounded text-blue-500 accent-blue-500 cursor-pointer" />
+                        </label>
+                        <p class="text-[11px] text-blue-300/70 mt-1">Khi tắt, trạm này sẽ tự động kế thừa theo Master Theme của sự kiện.</p>
+                    </div>
+
+                    <!-- Preset Themes Quick Switcher -->
+                    <div>
+                        <label class="block font-bold text-slate-300 uppercase tracking-wider mb-2 text-[11px]">Gợi Ý Phong Cách (Presets)</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" class="preset-theme-btn p-2.5 rounded-xl border border-white/10 bg-slate-800/80 hover:bg-slate-800 text-left transition-all cursor-pointer" data-primary="#2563eb" data-accent="#10b981" data-bg="#090d16">
+                                <div class="flex items-center gap-1.5 mb-1">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                </div>
+                                <span class="font-bold text-white text-[11px]">Modern Tech</span>
+                            </button>
+                            <button type="button" class="preset-theme-btn p-2.5 rounded-xl border border-white/10 bg-slate-800/80 hover:bg-slate-800 text-left transition-all cursor-pointer" data-primary="#10b981" data-accent="#06b6d4" data-bg="#06121e">
+                                <div class="flex items-center gap-1.5 mb-1">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+                                </div>
+                                <span class="font-bold text-white text-[11px]">Cyber Emerald</span>
+                            </button>
+                            <button type="button" class="preset-theme-btn p-2.5 rounded-xl border border-white/10 bg-slate-800/80 hover:bg-slate-800 text-left transition-all cursor-pointer" data-primary="#ea580c" data-accent="#f59e0b" data-bg="#180d09">
+                                <div class="flex items-center gap-1.5 mb-1">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                                </div>
+                                <span class="font-bold text-white text-[11px]">Vibrant Youth</span>
+                            </button>
+                            <button type="button" class="preset-theme-btn p-2.5 rounded-xl border border-white/10 bg-slate-800/80 hover:bg-slate-800 text-left transition-all cursor-pointer" data-primary="#7c3aed" data-accent="#ec4899" data-bg="#120b22">
+                                <div class="flex items-center gap-1.5 mb-1">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-pink-500"></span>
+                                </div>
+                                <span class="font-bold text-white text-[11px]">Neon Festival</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Brand Colors -->
+                    <div class="space-y-3">
+                        <label class="block font-bold text-slate-300 uppercase tracking-wider text-[11px]">Bảng Màu Nhận Diện</label>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Màu chủ đạo (Primary)</span>
+                            <div class="flex items-center gap-2">
+                                <input type="color" id="designer-color-primary" value="#2563eb" class="w-7 h-7 rounded-lg border-0 bg-transparent cursor-pointer" />
+                                <span id="designer-color-primary-hex" class="font-mono text-[11px] text-slate-300">#2563eb</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Màu điểm nhấn (Accent)</span>
+                            <div class="flex items-center gap-2">
+                                <input type="color" id="designer-color-accent" value="#10b981" class="w-7 h-7 rounded-lg border-0 bg-transparent cursor-pointer" />
+                                <span id="designer-color-accent-hex" class="font-mono text-[11px] text-slate-300">#10b981</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Màu nền chính (Background)</span>
+                            <div class="flex items-center gap-2">
+                                <input type="color" id="designer-color-bg" value="#090d16" class="w-7 h-7 rounded-lg border-0 bg-transparent cursor-pointer" />
+                                <span id="designer-color-bg-hex" class="font-mono text-[11px] text-slate-300">#090d16</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Logos & Backdrops -->
+                    <div class="space-y-3">
+                        <label class="block font-bold text-slate-300 uppercase tracking-wider text-[11px]">Logo & Banner Backdrop</label>
+                        <div>
+                            <span class="block text-slate-400 mb-1">URL Logo Gian hàng / Nhà tài trợ</span>
+                            <input type="url" id="designer-logo-url" placeholder="https://..." class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-white font-mono text-[11px] outline-none focus:border-blue-500" />
+                        </div>
+                        <div>
+                            <span class="block text-slate-400 mb-1">URL Banner / Hình nền Kiosk</span>
+                            <input type="url" id="designer-banner-url" placeholder="https://..." class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-white font-mono text-[11px] outline-none focus:border-blue-500" />
+                        </div>
+                    </div>
+
+                    <!-- Welcome Copy -->
+                    <div class="space-y-3">
+                        <label class="block font-bold text-slate-300 uppercase tracking-wider text-[11px]">Nội Dung Chào Mừng</label>
+                        <div>
+                            <span class="block text-slate-400 mb-1">Tiêu đề chào mừng</span>
+                            <input type="text" id="designer-welcome-title" placeholder="VD: Chào mừng bạn đến với Gian hàng FPT!" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-xs outline-none focus:border-blue-500" />
+                        </div>
+                        <div>
+                            <span class="block text-slate-400 mb-1">Slogan / Lời dặn quét thẻ</span>
+                            <input type="text" id="designer-welcome-subtitle" placeholder="VD: Quẹt thẻ để nhận quà công nghệ & phỏng vấn!" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-xs outline-none focus:border-blue-500" />
+                        </div>
+                    </div>
+
+                    <!-- Sponsor QR -->
+                    <div class="space-y-3">
+                        <label class="block font-bold text-slate-300 uppercase tracking-wider text-[11px]">Mã QR Quảng Bá / Tài Liệu Gian Hàng</label>
+                        <div>
+                            <span class="block text-slate-400 mb-1">Link ảnh QR hoặc link quét</span>
+                            <input type="text" id="designer-sponsor-qr" placeholder="https://..." class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-white font-mono text-[11px] outline-none focus:border-blue-500" />
+                        </div>
+                        <div>
+                            <span class="block text-slate-400 mb-1">Nhãn mô tả</span>
+                            <input type="text" id="designer-sponsor-label" placeholder="VD: Quét nhận cẩm nang nghề nghiệp" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-xs outline-none focus:border-blue-500" />
+                        </div>
+                    </div>
+
+                    <!-- Sound Tone -->
+                    <div>
+                        <label class="block font-bold text-slate-300 uppercase tracking-wider mb-2 text-[11px]">Âm Thanh Điểm Danh (Sound FX)</label>
+                        <select id="designer-sound-tone" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-xs outline-none focus:border-blue-500 cursor-pointer">
+                            <option value="beep_high">Bíp Đôi Công Nghệ (Mặc định)</option>
+                            <option value="chime_success">Chuông Thành Công (Chime)</option>
+                            <option value="bell">Chuông Ngân Vang (Bell)</option>
+                            <option value="arcade">Arcade Gaming (Vui nhộn)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- RIGHT PANEL: LIVE 16:9 INTERACTIVE ARTBOARD -->
+                <div class="flex-1 p-4 sm:p-6 lg:p-8 flex flex-col items-center justify-center bg-slate-950 overflow-hidden relative">
+                    <div class="w-full text-center mb-3">
+                        <span class="text-[11px] text-slate-400 font-medium">Mô Phỏng Trực Tiếp Màn Hình Kiosk 16:9 (Live Preview)</span>
+                    </div>
+
+                    <!-- Artboard Frame (16:9 Scale) -->
+                    <div id="designer-artboard" class="w-full aspect-[16/9] max-w-[800px] rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl relative flex flex-col justify-between p-4 transition-all duration-300" style="background-color: #090d16;">
+                        <!-- Artboard Header -->
+                        <div class="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm shrink-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <div id="artboard-logo-box" class="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                                    <i class="fa-solid fa-store text-xs text-blue-400" id="artboard-logo-icon"></i>
+                                    <img id="artboard-logo-img" src="" class="w-full h-full object-contain hidden" />
+                                </div>
+                                <div class="min-w-0">
+                                    <p class="font-bold text-xs truncate" id="artboard-booth-title">Gian Hàng SpringWave</p>
+                                    <p class="text-[9px] text-slate-400 truncate">Sự kiện Ngày Hội Hướng Nghiệp</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded-md text-[9px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    ĐÃ ĐÓN: 142
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Artboard Body Split -->
+                        <div class="flex-1 flex items-center gap-3 my-2 min-h-0">
+                            <!-- Left: Camera Frame Preview -->
+                            <div class="w-1/2 h-full rounded-xl bg-slate-900/90 border border-white/10 flex flex-col items-center justify-center relative overflow-hidden">
+                                <i class="fa-solid fa-camera text-slate-600 text-2xl mb-1"></i>
+                                <span class="text-[9px] text-slate-400">Khung quét Camera</span>
+                                <div class="absolute inset-x-4 h-0.5 bg-emerald-400/80 rounded-full"></div>
+                            </div>
+
+                            <!-- Right: Welcome & Info -->
+                            <div class="w-1/2 h-full rounded-xl bg-white/5 border border-white/10 p-3 flex flex-col justify-center text-left">
+                                <span class="text-[8px] uppercase tracking-wider text-blue-400 font-bold mb-0.5">CHÀO MỪNG ĐẾN VỚI</span>
+                                <h4 class="font-bold text-xs sm:text-sm text-white tracking-tight truncate" id="artboard-welcome-title">Điểm Danh & Khám Phá</h4>
+                                <p class="text-[9px] text-slate-400 line-clamp-2 mt-0.5" id="artboard-welcome-subtitle">Vui lòng quẹt thẻ sinh viên để nhận quà!</p>
+
+                                <div id="artboard-qr-card" class="hidden items-center gap-2 mt-2 p-1.5 rounded-lg bg-white/5 border border-white/5">
+                                    <div class="w-8 h-8 bg-white rounded flex items-center justify-center p-0.5 shrink-0">
+                                        <i class="fa-solid fa-qrcode text-slate-800 text-xs"></i>
+                                    </div>
+                                    <span class="text-[8px] text-slate-300 font-medium truncate" id="artboard-qr-label">Quét mã nhận cẩm nang</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Artboard Footer -->
+                        <div class="flex justify-between items-center text-[8px] text-slate-500 shrink-0 px-1">
+                            <span>Kiosk Mode Online</span>
+                            <span class="font-mono">SpringWave Multi-Station</span>
+                        </div>
                     </div>
                 </div>
             </div>

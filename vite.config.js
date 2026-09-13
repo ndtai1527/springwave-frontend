@@ -73,6 +73,7 @@ export default defineConfig({
         adminUniversities: resolve(__dirname, "admin-universities.html"),
         certificate: resolve(__dirname, "certificate.html"),
         policy: resolve(__dirname, "policy.html"),
+        kiosk: resolve(__dirname, "kiosk.html"),
       },
       output: {
         assetFileNames: (assetInfo) => {
