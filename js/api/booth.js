@@ -70,24 +70,28 @@ export async function getKioskAuthConfig(code) {
 /**
  * 8. Lấy cache 5.000 sinh viên để nạp vào IndexedDB
  */
-export async function getKioskStudentCache(eventId) {
+export async function getKioskStudentCache(eventId, kioskToken) {
+  const headers = {
+    'Accept': 'application/json',
+    ...(kioskToken ? { Authorization: `Bearer ${kioskToken}` } : {})
+  };
   try {
     const res = await fetch(`${WORKER_BASE_URL}/api/kiosk/students/${eventId}`, {
-      headers: { 'Accept': 'application/json' }
+      headers
     });
     if (res.ok) return await res.json();
   } catch (e) {
     console.warn('Worker student cache fallback to backend API');
   }
   const res2 = await fetch(`${API_BASE_URL}/api/booths/kiosk-cache/${eventId}`, {
-    headers: { 'Accept': 'application/json' }
+    headers
   });
   if (!res2.ok) throw new Error('Không thể tải dữ liệu sinh viên sự kiện');
   return await res2.json();
 }
 
 /**
- * 9. Ký số HMAC-SHA256 và gửi lượt điểm danh lên Cloudflare Worker
+ * 9. Gửi lượt điểm danh với kiosk session token và operationId idempotency
  */
 export async function submitKioskCheckin({
   eventId,
@@ -96,7 +100,8 @@ export async function submitKioskCheckin({
   attendanceId,
   photoBase64,
   deviceInfo,
-  signingKey
+  kioskToken,
+  operationId
 }) {
   const payload = {
     eventId,
@@ -105,48 +110,14 @@ export async function submitKioskCheckin({
     attendanceId,
     photoBase64,
     deviceInfo: deviceInfo || 'Kiosk Camera Terminal',
-    signingKey
+    operationId
   };
 
   const rawBody = JSON.stringify(payload);
-  const timestamp = Date.now().toString();
-  const nonce = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)) + '-' + Date.now();
-
   const headers = {
     'Content-Type': 'application/json',
-    'X-Timestamp': timestamp,
-    'X-Nonce': nonce
+    ...(kioskToken ? { Authorization: `Bearer ${kioskToken}` } : {})
   };
-
-  // Tính toán chữ ký HMAC-SHA256 nếu có signingKey
-  if (signingKey && window.crypto && window.crypto.subtle) {
-    try {
-      const enc = new TextEncoder();
-      const bodyHashBuf = await crypto.subtle.digest('SHA-256', enc.encode(rawBody));
-      const bodyHashHex = Array.from(new Uint8Array(bodyHashBuf))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-
-      const msg = `POST:/api/kiosk/checkin:${timestamp}:${nonce}:${bodyHashHex}`;
-      const keyBytes = new Uint8Array(
-        signingKey.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
-      );
-      const cryptoKey = await crypto.subtle.importKey(
-        'raw',
-        keyBytes,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-      );
-      const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(msg));
-      const signatureHex = Array.from(new Uint8Array(sigBuf))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-      headers['X-Signature'] = signatureHex;
-    } catch (sigErr) {
-      console.warn('HMAC computation skipped:', sigErr);
-    }
-  }
 
   // Gửi tới Worker
   try {
@@ -175,7 +146,7 @@ export async function submitKioskCheckin({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Internal-Secret': 'springwave-internal-sync-secret'
+        ...(kioskToken ? { Authorization: `Bearer ${kioskToken}` } : {})
       },
       body: JSON.stringify({
         eventId,
@@ -183,7 +154,8 @@ export async function submitKioskCheckin({
         studentId,
         attendanceId,
         photoUrl: '',
-        deviceInfo: 'Kiosk Direct Fallback'
+        deviceInfo: 'Kiosk Direct Fallback',
+        operationId
       })
     });
     const fallbackRes = await res2.json().catch(() => ({}));
@@ -207,6 +179,20 @@ export async function manualCheckinBooth(eventId, boothCode, attendanceId) {
     boothCode: (boothCode || '').toUpperCase(),
     attendanceId
   });
+}
+
+export async function exitKiosk(kioskToken, pin) {
+  const response = await fetch(`${API_BASE_URL}/api/booths/kiosk-exit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${kioskToken}`
+    },
+    body: JSON.stringify({ pin })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Mã PIN trạm không đúng');
+  return data;
 }
 
 /**

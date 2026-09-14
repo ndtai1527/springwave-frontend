@@ -1,7 +1,8 @@
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
-import { getKioskAuthConfig, getKioskStudentCache, submitKioskCheckin } from "../api/booth.js";
+import { getKioskAuthConfig, getKioskStudentCache, submitKioskCheckin, exitKiosk } from "../api/booth.js";
 import { initI18n, t } from "../lib/i18n.js";
+import { API_BASE_URL } from "../config.js";
 
 // =========================================================================
 // STATE & CONFIGURATION
@@ -15,6 +16,61 @@ let scanCooldown = false;
 let studentMap = new Map(); // studentId / ticketCode -> student details
 let offlineQueue = [];
 let isSyncingOffline = false;
+const KIOSK_QUEUE_DB = 'springwave-kiosk-outbox-v1';
+function safeKioskUrl(value) {
+  try {
+    const url = new URL(String(value || ''), window.location.origin);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch { return ''; }
+}
+
+function makeOperationId() {
+  return (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
+}
+
+function openQueueDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(KIOSK_QUEUE_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('outbox', { keyPath: 'operationId' });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function loadOfflineQueue() {
+  try {
+    const db = await openQueueDb();
+    offlineQueue = await new Promise((resolve, reject) => {
+      const request = db.transaction('outbox').objectStore('outbox').getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    updateOfflineBadge();
+  } catch (error) {
+    console.warn('[Kiosk] Durable outbox unavailable:', error);
+  }
+}
+
+async function persistQueueItem(item) {
+  const db = await openQueueDb();
+  await new Promise((resolve, reject) => {
+    const request = db.transaction('outbox', 'readwrite').objectStore('outbox').put(item);
+    request.onsuccess = resolve;
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+}
+
+async function removeQueueItem(operationId) {
+  const db = await openQueueDb();
+  await new Promise((resolve, reject) => {
+    const request = db.transaction('outbox', 'readwrite').objectStore('outbox').delete(operationId);
+    request.onsuccess = resolve;
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+}
 
 // Web Audio synthesizer for zero-latency audio chimes
 function playChime(toneType = 'beep_high') {
@@ -74,7 +130,7 @@ function playChime(toneType = 'beep_high') {
 // =========================================================================
 // 1. ACTIVATION FLOW (6-CHARACTER PIN INPUT)
 // =========================================================================
-function initActivationView() {
+async function initActivationView() {
   const inputs = Array.from(document.querySelectorAll('#booth-code-inputs .code-box'));
   const submitBtn = document.getElementById('btn-submit-code');
   const activateMsg = document.getElementById('activate-msg');
@@ -141,7 +197,6 @@ function initActivationView() {
       }
 
       currentSession = data;
-      localStorage.setItem('sw_kiosk_session', JSON.stringify(data));
 
       activateMsg.textContent = `Khởi tạo thành công trạm ${data.booth.name}!`;
       activateMsg.className = 'text-sm font-medium text-emerald-400 mb-6';
@@ -160,18 +215,8 @@ function initActivationView() {
     }
   });
 
-  // Check existing session
-  const saved = localStorage.getItem('sw_kiosk_session');
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (parsed?.booth && parsed?.event) {
-        setupAndLaunchKiosk(parsed);
-      }
-    } catch (e) {
-      localStorage.removeItem('sw_kiosk_session');
-    }
-  }
+  // Tokens stay in memory; operators re-authenticate after a refresh.
+  await loadOfflineQueue();
 }
 
 // =========================================================================
@@ -195,8 +240,9 @@ async function setupAndLaunchKiosk(session) {
 
   // 2. Banner & Backdrop
   const bgBackdrop = document.getElementById('kiosk-bg-backdrop');
-  if (kioskConfig.bannerUrl) {
-    bgBackdrop.style.backgroundImage = `url('${kioskConfig.bannerUrl}')`;
+  const safeBannerUrl = safeKioskUrl(kioskConfig.bannerUrl);
+  if (safeBannerUrl) {
+    bgBackdrop.style.backgroundImage = `url("${safeBannerUrl}")`;
     bgBackdrop.classList.remove('opacity-20');
     bgBackdrop.classList.add('opacity-35');
   }
@@ -212,8 +258,9 @@ async function setupAndLaunchKiosk(session) {
   if (boothBadge) boothBadge.textContent = booth.boothCode;
   if (eventSubtitle) eventSubtitle.textContent = event.title;
 
-  if (kioskConfig.logoUrl) {
-    logoImg.src = kioskConfig.logoUrl;
+  const safeLogoUrl = safeKioskUrl(kioskConfig.logoUrl);
+  if (safeLogoUrl) {
+    logoImg.src = safeLogoUrl;
     logoImg.classList.remove('hidden');
     logoFallback.classList.add('hidden');
   } else {
@@ -241,8 +288,9 @@ async function setupAndLaunchKiosk(session) {
   const sponsorQrImg = document.getElementById('sponsor-qr-img');
   const sponsorQrLabel = document.getElementById('sponsor-qr-label');
 
-  if (kioskConfig.layout?.sponsorQrUrl) {
-    sponsorQrImg.src = kioskConfig.layout.sponsorQrUrl;
+  const safeSponsorUrl = safeKioskUrl(kioskConfig.layout?.sponsorQrUrl);
+  if (safeSponsorUrl) {
+    sponsorQrImg.src = safeSponsorUrl;
     if (kioskConfig.layout.sponsorQrLabel) {
       sponsorQrLabel.textContent = kioskConfig.layout.sponsorQrLabel;
     }
@@ -261,7 +309,8 @@ async function setupAndLaunchKiosk(session) {
   document.getElementById('view-kiosk').classList.remove('hidden');
 
   // 8. Tải sẵn Cache sinh viên về Local Map để đối soát dưới 2ms
-  loadStudentCache(event._id);
+  loadStudentCache(event._id, session.kioskToken);
+  startLiveRosterUpdates(event._id, session.kioskToken);
 
   // 9. Khởi động Camera ZXing
   initCameraScanner();
@@ -270,9 +319,9 @@ async function setupAndLaunchKiosk(session) {
 // =========================================================================
 // 3. STUDENT CACHE (INDEXED MAP FOR ZERO-LATENCY VERIFICATION)
 // =========================================================================
-async function loadStudentCache(eventId) {
+async function loadStudentCache(eventId, kioskToken) {
   try {
-    const data = await getKioskStudentCache(eventId);
+    const data = await getKioskStudentCache(eventId, kioskToken);
     studentMap.clear();
     (data.students || []).forEach(st => {
       if (st.studentId) studentMap.set(st.studentId.toUpperCase(), st);
@@ -282,6 +331,48 @@ async function loadStudentCache(eventId) {
   } catch (err) {
     console.warn('[Kiosk] Could not preload student cache, will verify via server:', err);
   }
+}
+
+let liveRefreshTimer = null;
+let liveStreamAbort = null;
+async function refreshKioskRoster() {
+  if (!currentSession?.event?._id || !currentSession?.kioskToken) return;
+  await loadStudentCache(currentSession.event._id, currentSession.kioskToken);
+}
+
+function startLiveRosterUpdates(eventId, kioskToken) {
+  clearInterval(liveRefreshTimer);
+  liveStreamAbort?.abort();
+  let fallbackStarted = false;
+  const startPollingFallback = () => {
+    if (fallbackStarted) return;
+    fallbackStarted = true;
+    liveRefreshTimer = setInterval(() => refreshKioskRoster().catch(() => {}), 15000);
+  };
+  const controller = new AbortController();
+  liveStreamAbort = controller;
+  (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/booths/kiosk-stream/${eventId}`, {
+        headers: { Authorization: `Bearer ${kioskToken}`, Accept: 'text/event-stream' },
+        signal: controller.signal
+      });
+      if (!response.ok || !response.body) throw new Error(`SSE ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (!controller.signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error('SSE closed');
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop() || '';
+        if (chunks.some(chunk => chunk.includes('event: kiosk-update'))) await refreshKioskRoster();
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) startPollingFallback();
+    }
+  })();
 }
 
 // =========================================================================
@@ -423,12 +514,12 @@ async function handleScannedCode(rawCode) {
     attendanceId,
     photoBase64,
     deviceInfo: `Kiosk Terminal (${booth.name})`,
-    signingKey: currentSession.boothSigningKey
+    operationId: makeOperationId()
   };
 
   try {
     if (navigator.onLine) {
-      const res = await submitKioskCheckin(checkinPayload);
+      const res = await submitKioskCheckin({ ...checkinPayload, kioskToken: currentSession.kioskToken });
       // Cập nhật local cache ngay để các lần quét sau nhận biết tức thì
       if (cachedStudent) {
         if (!cachedStudent.visitedBooths) cachedStudent.visitedBooths = [];
@@ -496,16 +587,16 @@ function showResultFlyout({ isSuccess, title, studentName, studentId, message })
   msgEl.textContent = message;
 
   if (isSuccess) {
-    card.className = 'relative w-full max-w-sm sm:max-w-md rounded-3xl p-6 sm:p-8 bg-slate-900 border-2 border-emerald-500/50 shadow-2xl shadow-emerald-500/20 text-center transform transition-all scale-100 opacity-100';
-    nameEl.className = 'text-lg sm:text-xl font-bold text-emerald-400 mb-1';
-    iconBg.className = 'relative w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg';
-    ring.className = 'absolute inset-0 rounded-full bg-emerald-500/20 animate-pulse-ring';
+    card.className = 'relative w-full rounded-xl p-4 bg-slate-900 border border-emerald-500/60 text-center transform transition-all scale-100 opacity-100';
+    nameEl.className = 'text-base font-bold text-emerald-400 mb-1';
+    iconBg.className = 'relative w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center';
+    ring.className = 'hidden';
     icon.textContent = 'check';
   } else {
-    card.className = 'relative w-full max-w-sm sm:max-w-md rounded-3xl p-6 sm:p-8 bg-slate-900 border-2 border-rose-500/50 shadow-2xl shadow-rose-500/20 text-center transform transition-all scale-100 opacity-100';
-    nameEl.className = 'text-lg sm:text-xl font-bold text-rose-400 mb-1';
-    iconBg.className = 'relative w-16 h-16 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-lg';
-    ring.className = 'absolute inset-0 rounded-full bg-rose-500/20 animate-pulse-ring';
+    card.className = 'relative w-full rounded-xl p-4 bg-slate-900 border border-rose-500/60 text-center transform transition-all scale-100 opacity-100';
+    nameEl.className = 'text-base font-bold text-rose-400 mb-1';
+    iconBg.className = 'relative w-10 h-10 rounded-lg bg-rose-600 text-white flex items-center justify-center';
+    ring.className = 'hidden';
     icon.textContent = 'close';
   }
 
@@ -559,7 +650,9 @@ function updateRecentFeed(name, id) {
 // 6. OFFLINE QUEUE (INDEXEDDB SYNC)
 // =========================================================================
 function enqueueOfflineCheckin(payload) {
-  offlineQueue.push(payload);
+  const item = { ...payload, queuedAt: Date.now() };
+  offlineQueue.push(item);
+  persistQueueItem(item).catch(error => console.warn('[Kiosk] Could not persist outbox item:', error));
   updateOfflineBadge();
 }
 
@@ -577,7 +670,7 @@ function updateOfflineBadge() {
 }
 
 async function flushOfflineQueue() {
-  if (isSyncingOffline || offlineQueue.length === 0 || !navigator.onLine) return;
+  if (isSyncingOffline || offlineQueue.length === 0 || !navigator.onLine || !currentSession?.kioskToken) return;
   isSyncingOffline = true;
 
   console.log(`[Kiosk] Syncing ${offlineQueue.length} offline records to server...`);
@@ -585,7 +678,8 @@ async function flushOfflineQueue() {
 
   for (const item of offlineQueue) {
     try {
-      await submitKioskCheckin(item);
+      await submitKioskCheckin({ ...item, kioskToken: currentSession.kioskToken });
+      await removeQueueItem(item.operationId);
     } catch (err) {
       if (err.isBusinessError || err.alreadyVisited || (err.status >= 400 && err.status < 500)) {
         console.warn('[OfflineQueue] Dropping invalid item from retry queue:', err.message);
@@ -672,26 +766,28 @@ function initControls() {
 
   cancelExitBtn?.addEventListener('click', () => exitModal.classList.add('hidden'));
 
-  confirmExitBtn?.addEventListener('click', () => {
+  confirmExitBtn?.addEventListener('click', async () => {
     const enteredPin = exitPinInput.value.trim();
-    const correctPin = currentSession?.booth?.pinCode || '1234';
-
-    if (enteredPin !== correctPin && enteredPin !== '1234') {
-      exitErrorMsg.textContent = 'Mã PIN trạm không đúng';
+    confirmExitBtn.disabled = true;
+    try {
+      await exitKiosk(currentSession.kioskToken, enteredPin);
+      if (zxingReader) zxingReader.reset();
+      currentSession = null;
+      clearInterval(liveRefreshTimer);
+      liveStreamAbort?.abort();
+      offlineQueue = [];
+      exitModal.classList.add('hidden');
+      document.getElementById('view-kiosk').classList.add('hidden');
+      document.getElementById('view-activate').classList.remove('hidden');
+      const inputs = Array.from(document.querySelectorAll('#booth-code-inputs .code-box'));
+      inputs.forEach(i => i.value = '');
+      inputs[0]?.focus();
+    } catch (error) {
+      exitErrorMsg.textContent = error.message || 'Không thể thoát trạm';
       exitPinInput.focus();
-      return;
+    } finally {
+      confirmExitBtn.disabled = false;
     }
-
-    // Stop camera & reset
-    if (zxingReader) zxingReader.reset();
-    localStorage.removeItem('sw_kiosk_session');
-    exitModal.classList.add('hidden');
-    document.getElementById('view-kiosk').classList.add('hidden');
-    document.getElementById('view-activate').classList.remove('hidden');
-
-    const inputs = Array.from(document.querySelectorAll('#booth-code-inputs .code-box'));
-    inputs.forEach(i => i.value = '');
-    inputs[0].focus();
   });
 }
 

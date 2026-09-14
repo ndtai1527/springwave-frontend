@@ -2404,12 +2404,12 @@
                                 </div>
                                 <span class="font-bold text-white text-[11px]">Vibrant Youth</span>
                             </button>
-                            <button type="button" class="preset-theme-btn p-2.5 rounded-xl border border-white/10 bg-slate-800/80 hover:bg-slate-800 text-left transition-all cursor-pointer" data-primary="#7c3aed" data-accent="#ec4899" data-bg="#120b22">
+                            <button type="button" class="preset-theme-btn p-2.5 rounded-xl border border-white/10 bg-slate-800/80 hover:bg-slate-800 text-left transition-all cursor-pointer" data-primary="#475569" data-accent="#f59e0b" data-bg="#111827">
                                 <div class="flex items-center gap-1.5 mb-1">
-                                    <span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
-                                    <span class="w-2.5 h-2.5 rounded-full bg-pink-500"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
                                 </div>
-                                <span class="font-bold text-white text-[11px]">Neon Festival</span>
+                                <span class="font-bold text-white text-[11px]">Solid Contrast</span>
                             </button>
                         </div>
                     </div>
@@ -2500,7 +2500,7 @@
                     <!-- Artboard Frame (16:9 Scale) -->
                     <div id="designer-artboard" class="w-full aspect-[16/9] max-w-[800px] rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl relative flex flex-col justify-between p-4 transition-all duration-300" style="background-color: #090d16;">
                         <!-- Artboard Header -->
-                        <div class="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm shrink-0">
+                        <div id="artboard-header" data-designer-element="header" class="designer-draggable flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm shrink-0">
                             <div class="flex items-center gap-2 min-w-0">
                                 <div id="artboard-logo-box" class="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden shrink-0">
                                     <i class="fa-solid fa-store text-xs text-blue-400" id="artboard-logo-icon"></i>
@@ -2521,14 +2521,14 @@
                         <!-- Artboard Body Split -->
                         <div class="flex-1 flex items-center gap-3 my-2 min-h-0">
                             <!-- Left: Camera Frame Preview -->
-                            <div class="w-1/2 h-full rounded-xl bg-slate-900/90 border border-white/10 flex flex-col items-center justify-center relative overflow-hidden">
+                            <div id="artboard-camera" data-designer-element="camera" class="designer-draggable w-1/2 h-full rounded-xl bg-slate-900/90 border border-white/10 flex flex-col items-center justify-center relative overflow-hidden">
                                 <i class="fa-solid fa-camera text-slate-600 text-2xl mb-1"></i>
                                 <span class="text-[9px] text-slate-400">Khung quét Camera</span>
                                 <div class="absolute inset-x-4 h-0.5 bg-emerald-400/80 rounded-full"></div>
                             </div>
 
                             <!-- Right: Welcome & Info -->
-                            <div class="w-1/2 h-full rounded-xl bg-white/5 border border-white/10 p-3 flex flex-col justify-center text-left">
+                            <div id="artboard-welcome" data-designer-element="welcome" class="designer-draggable w-1/2 h-full rounded-xl bg-white/5 border border-white/10 p-3 flex flex-col justify-center text-left">
                                 <span class="text-[8px] uppercase tracking-wider text-blue-400 font-bold mb-0.5">CHÀO MỪNG ĐẾN VỚI</span>
                                 <h4 class="font-bold text-xs sm:text-sm text-white tracking-tight truncate" id="artboard-welcome-title">Điểm Danh & Khám Phá</h4>
                                 <p class="text-[9px] text-slate-400 line-clamp-2 mt-0.5" id="artboard-welcome-subtitle">Vui lòng quẹt thẻ sinh viên để nhận quà!</p>
@@ -2543,7 +2543,7 @@
                         </div>
 
                         <!-- Artboard Footer -->
-                        <div class="flex justify-between items-center text-[8px] text-slate-500 shrink-0 px-1">
+                        <div id="artboard-footer" data-designer-element="footer" class="designer-draggable flex justify-between items-center text-[8px] text-slate-500 shrink-0 px-1">
                             <span>Kiosk Mode Online</span>
                             <span class="font-mono">SpringWave Multi-Station</span>
                         </div>

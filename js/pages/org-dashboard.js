@@ -8537,6 +8537,50 @@ function syncDesignerInputsFromConfig() {
   if (sponsorQr) sponsorQr.value = cfg.layout?.sponsorQrUrl || "";
   if (sponsorLabel) sponsorLabel.value = cfg.layout?.sponsorQrLabel || "";
   if (soundTone) soundTone.value = cfg.soundTone || "beep_high";
+  applyDesignerPositions(cfg.layout?.positions || {});
+}
+
+function applyDesignerPositions(positions) {
+  document.querySelectorAll('#designer-artboard [data-designer-element]').forEach((element) => {
+    const position = positions[element.dataset.designerElement];
+    element.style.transform = position ? `translate(${Number(position.x) || 0}%, ${Number(position.y) || 0}%)` : '';
+  });
+}
+
+function initDesignerDrag() {
+  const artboard = document.getElementById('designer-artboard');
+  if (!artboard || artboard.dataset.dragReady) return;
+  artboard.dataset.dragReady = 'true';
+  artboard.querySelectorAll('[data-designer-element]').forEach((element) => {
+    element.title = 'Kéo để sắp xếp trong kiosk';
+    element.addEventListener('pointerdown', (event) => {
+      if (event.target.closest('input,button,select,a')) return;
+      event.preventDefault();
+      element.setPointerCapture(event.pointerId);
+      const rect = artboard.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const previous = element.style.transform;
+      const match = previous.match(/translate\((-?[\d.]+)%?,\s*(-?[\d.]+)%?\)/);
+      const baseX = match ? Number(match[1]) : 0;
+      const baseY = match ? Number(match[2]) : 0;
+      const move = (moveEvent) => {
+        const x = Math.max(-20, Math.min(20, baseX + ((moveEvent.clientX - startX) / rect.width) * 100));
+        const y = Math.max(-20, Math.min(20, baseY + ((moveEvent.clientY - startY) / rect.height) * 100));
+        element.style.transform = `translate(${x}%, ${y}%)`;
+        element.dataset.positionX = String(Math.round(x * 10) / 10);
+        element.dataset.positionY = String(Math.round(y * 10) / 10);
+      };
+      const up = () => {
+        element.removeEventListener('pointermove', move);
+        element.removeEventListener('pointerup', up);
+        element.removeEventListener('pointercancel', up);
+      };
+      element.addEventListener('pointermove', move);
+      element.addEventListener('pointerup', up);
+      element.addEventListener('pointercancel', up);
+    });
+  });
 }
 
 function updateArtboardLive() {
@@ -8722,8 +8766,9 @@ function initMultiBoothManager() {
   // Reset Designer to Defaults
   document.getElementById("btn-reset-kiosk-designer")?.addEventListener("click", () => {
     activeDesignerConfig = JSON.parse(JSON.stringify(DEFAULT_KIOSK_TEMPLATE));
-    syncDesignerInputsFromConfig();
-    updateArtboardLive();
+  syncDesignerInputsFromConfig();
+  initDesignerDrag();
+  updateArtboardLive();
   });
 
   // Close Designer Modal
@@ -8756,7 +8801,8 @@ function initMultiBoothManager() {
         showLiveCounter: true,
         counterPosition: "top-right",
         sponsorQrUrl: document.getElementById("designer-sponsor-qr")?.value?.trim() || "",
-        sponsorQrLabel: document.getElementById("designer-sponsor-label")?.value?.trim() || ""
+        sponsorQrLabel: document.getElementById("designer-sponsor-label")?.value?.trim() || "",
+        positions: Object.fromEntries(Array.from(document.querySelectorAll('#designer-artboard [data-designer-element]')).map((element) => [element.dataset.designerElement, { x: Number(element.dataset.positionX) || 0, y: Number(element.dataset.positionY) || 0 }]))
       }
     };
 

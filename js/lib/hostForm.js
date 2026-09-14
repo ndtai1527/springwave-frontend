@@ -963,6 +963,8 @@ export async function initEditMode(eventId) {
         if (minB && event.multiBoothConfig.minBoothsRequired !== undefined) minB.value = event.multiBoothConfig.minBoothsRequired;
         if (reqP && event.multiBoothConfig.requirePhoto !== undefined) reqP.checked = Boolean(event.multiBoothConfig.requirePhoto);
       }
+      const kioskPinEl = document.getElementById("kioskExitPin");
+      if (kioskPinEl) kioskPinEl.value = "";
 
       // Load existing booths if editing
       const eventId = event._id || event.id;
@@ -1303,6 +1305,11 @@ export function initFormSubmit(orgId, onSuccess) {
         const hasMultiBooth = document.getElementById("hasMultiBooth")?.checked;
         formData.append("hasMultiBooth", hasMultiBooth ? "true" : "false");
         if (hasMultiBooth) {
+            const kioskExitPin = document.getElementById("kioskExitPin")?.value?.trim();
+            if (!isEdit && !/^\d{4,8}$/.test(kioskExitPin || "")) {
+                throw new Error("Vui lòng đặt PIN thoát Kiosk gồm 4–8 chữ số.");
+            }
+            if (kioskExitPin) formData.append("kioskExitPin", kioskExitPin);
             const multiBoothConfig = {
                 boothTypeLabel: document.getElementById("boothTypeLabel")?.value || "booth",
                 minBoothsRequired: parseInt(document.getElementById("minBoothsRequired")?.value, 10) || 0,
