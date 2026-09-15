@@ -1,5 +1,5 @@
 export const API_BASE_URL =
-  import.meta.env?.VITE_API_URL || "https://api.springwave.io.vn";
+  import.meta.env?.VITE_API_URL || "https://api2.springwave.io.vn";
 export const WORKER_BASE_URL =
   import.meta.env?.VITE_WORKER_URL || "https://worker.springwave.io.vn";
 export const CDN_DOMAIN =

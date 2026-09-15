@@ -452,17 +452,25 @@ function captureVideoFrameToWebP() {
 }
 
 // =========================================================================
+// =========================================================================
 // 5. CHECK-IN LOGIC & ANIMATED RESULT FLYOUT
 // =========================================================================
+let flyoutDismissTimer = null;
+
 async function handleScannedCode(rawCode) {
   if (!rawCode || scanCooldown) return;
   scanCooldown = true;
 
   const cleanCode = rawCode.trim().toUpperCase();
   const photoBase64 = captureVideoFrameToWebP();
-  const booth = currentSession.booth;
-  const event = currentSession.event;
-  const kioskConfig = currentSession.kioskConfig;
+  const booth = currentSession?.booth;
+  const event = currentSession?.event;
+  const kioskConfig = currentSession?.kioskConfig || {};
+
+  if (!booth || !event) {
+    scanCooldown = false;
+    return;
+  }
 
   // Tra cứu siêu tốc trên local cache
   const cachedStudent = studentMap.get(cleanCode);
@@ -486,27 +494,16 @@ async function handleScannedCode(rawCode) {
     return;
   }
 
-  // Phát âm thanh check-in thành công
-  playChime(kioskConfig.soundTone || 'beep_high');
-
-  // Hiển thị Card chúc mừng ngay lập tức (< 50ms)
+  // Hiển thị trạng thái đang kiểm tra (Verifying state)
   showResultFlyout({
-    isSuccess: true,
-    title: kioskConfig.feedbackMessage?.title || 'Điểm danh thành công!',
+    isVerifying: true,
+    title: 'Đang kiểm tra...',
     studentName,
     studentId,
-    message: `Đã ghi nhận lượt tham quan tại ${booth.name}`
+    message: `Đang xác thực thông tin với máy chủ tại ${booth.name}...`
   });
 
-  // Cập nhật bộ đếm và danh sách gần đây
-  updateRecentFeed(studentName, studentId);
-  const counterEl = document.getElementById('kiosk-live-counter');
-  if (counterEl) {
-    const current = parseInt(counterEl.textContent, 10) || 0;
-    counterEl.textContent = current + 1;
-  }
-
-  // Đẩy bản ghi điểm danh kèm ảnh WebP lên Worker
+  // Bản ghi gửi lên server
   const checkinPayload = {
     eventId: event._id || event.id,
     boothCode: booth.boothCode || booth.code,
@@ -520,22 +517,74 @@ async function handleScannedCode(rawCode) {
   try {
     if (navigator.onLine) {
       const res = await submitKioskCheckin({ ...checkinPayload, kioskToken: currentSession.kioskToken });
-      // Cập nhật local cache ngay để các lần quét sau nhận biết tức thì
-      if (cachedStudent) {
-        if (!cachedStudent.visitedBooths) cachedStudent.visitedBooths = [];
-        if (!cachedStudent.visitedBooths.includes(booth.boothCode)) {
-          cachedStudent.visitedBooths.push(booth.boothCode);
+      const finalStudentName = res.studentName || studentName;
+
+      if (res.alreadyVisited) {
+        // Máy chủ thông báo sinh viên này đã từng check-in trạm này
+        playChime('buzz');
+        showResultFlyout({
+          isSuccess: false,
+          title: 'Đã check-in trước đó!',
+          studentName: finalStudentName,
+          studentId,
+          message: `Bạn đã được ghi nhận tham quan tại ${booth.name} rồi.`
+        });
+        if (cachedStudent) {
+          if (!cachedStudent.visitedBooths) cachedStudent.visitedBooths = [];
+          if (!cachedStudent.visitedBooths.includes(booth.boothCode)) {
+            cachedStudent.visitedBooths.push(booth.boothCode);
+          }
+        }
+      } else {
+        // Điểm danh máy chủ THÀNH CÔNG VÀ XÁC THỰC
+        playChime(kioskConfig.soundTone || 'beep_high');
+
+        showResultFlyout({
+          isSuccess: true,
+          title: kioskConfig.feedbackMessage?.title || 'Điểm danh thành công!',
+          studentName: finalStudentName,
+          studentId,
+          message: `Đã ghi nhận lượt tham quan tại ${booth.name}`
+        });
+
+        // Cập nhật recent feed và bộ đếm
+        updateRecentFeed(finalStudentName, studentId);
+        const counterEl = document.getElementById('kiosk-live-counter');
+        if (counterEl) {
+          if (res.checkinCount != null) {
+            counterEl.textContent = res.checkinCount;
+          } else {
+            const current = parseInt(counterEl.textContent, 10) || 0;
+            counterEl.textContent = current + 1;
+          }
+        }
+
+        // Cập nhật local cache
+        if (cachedStudent) {
+          if (!cachedStudent.visitedBooths) cachedStudent.visitedBooths = [];
+          if (!cachedStudent.visitedBooths.includes(booth.boothCode)) {
+            cachedStudent.visitedBooths.push(booth.boothCode);
+          }
+          if (res.stationCheckins) {
+            cachedStudent.stationCheckins = res.stationCheckins;
+          }
         }
       }
-      if (res?.checkinCount && counterEl) {
-        counterEl.textContent = res.checkinCount;
-      }
     } else {
+      // Thiết bị đang ngoại tuyến
+      playChime('bell');
       enqueueOfflineCheckin(checkinPayload);
+      showResultFlyout({
+        isOfflineQueued: true,
+        title: 'Đã lưu ngoại tuyến',
+        studentName,
+        studentId,
+        message: 'Mất kết nối mạng. Lượt điểm danh đã được lưu và sẽ tự động đồng bộ khi có kết nối trở lại.'
+      });
     }
   } catch (err) {
     if (err.isBusinessError || err.alreadyVisited || (err.status >= 400 && err.status < 500)) {
-      // Lỗi nghiệp vụ từ server (ví dụ đã điểm danh hoặc sự kiện chưa bắt đầu)
+      // Lỗi nghiệp vụ (chưa đăng ký sự kiện, mã thẻ sai, sự kiện chưa diễn ra, hoặc đã check-in)
       console.warn('[Checkin] Server rejected checkin:', err.message);
       playChime('buzz');
       showResultFlyout({
@@ -545,12 +594,6 @@ async function handleScannedCode(rawCode) {
         studentId,
         message: err.message || `Lỗi ghi nhận tại ${booth.name}`
       });
-      // Hoàn lại bộ đếm nếu lỡ tăng
-      if (counterEl) {
-        const current = parseInt(counterEl.textContent, 10) || 0;
-        if (current > 0) counterEl.textContent = current - 1;
-      }
-      // Ghi nhận vào local cache để ngăn quét lại
       if (err.alreadyVisited && cachedStudent) {
         if (!cachedStudent.visitedBooths) cachedStudent.visitedBooths = [];
         if (!cachedStudent.visitedBooths.includes(booth.boothCode)) {
@@ -558,19 +601,29 @@ async function handleScannedCode(rawCode) {
         }
       }
     } else {
-      // Lỗi mất kết nối mạng thực sự -> lưu hàng đợi offline
-      console.warn('[Checkin] Network error, deferred to offline queue:', err);
+      // Lỗi mạng hoặc 5xx/timeout -> Lưu hàng đợi offline và thông báo rõ ràng
+      console.warn('[Checkin] Network/Server timeout, deferred to offline queue:', err);
+      playChime('bell');
       enqueueOfflineCheckin(checkinPayload);
+      showResultFlyout({
+        isOfflineQueued: true,
+        title: 'Đã lưu ngoại tuyến',
+        studentName,
+        studentId,
+        message: 'Hệ thống lưu ngoại tuyến do phản hồi chậm. Dữ liệu sẽ tự động đồng bộ lại khi có kết nối ổn định.'
+      });
     }
+  } finally {
+    // Cooldown 1.2s trước khi quét thẻ tiếp theo
+    setTimeout(() => {
+      scanCooldown = false;
+    }, 1200);
   }
-
-  // Cooldown ngắn (1.4s) để tiếp tục đón bạn tiếp theo
-  setTimeout(() => {
-    scanCooldown = false;
-  }, 1400);
 }
 
-function showResultFlyout({ isSuccess, title, studentName, studentId, message }) {
+function showResultFlyout({ isSuccess, isVerifying, isOfflineQueued, title, studentName, studentId, message }) {
+  clearTimeout(flyoutDismissTimer);
+
   const modal = document.getElementById('checkin-modal');
   const card = document.getElementById('checkin-card');
   const titleEl = document.getElementById('result-status-title');
@@ -581,36 +634,60 @@ function showResultFlyout({ isSuccess, title, studentName, studentId, message })
   const iconBg = document.getElementById('result-icon-bg');
   const icon = document.getElementById('result-icon');
 
+  if (!modal || !card) return;
+
   titleEl.textContent = title;
-  nameEl.textContent = studentName;
-  idEl.textContent = `Mã SV: ${studentId}`;
+  nameEl.textContent = studentName || '';
+  idEl.textContent = studentId ? `MSSV / Mã vé: ${studentId}` : '';
   msgEl.textContent = message;
 
-  if (isSuccess) {
-    card.className = 'relative w-full rounded-xl p-4 bg-slate-900 border border-emerald-500/60 text-center transform transition-all scale-100 opacity-100';
-    nameEl.className = 'text-base font-bold text-emerald-400 mb-1';
-    iconBg.className = 'relative w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center';
-    ring.className = 'hidden';
+  if (isVerifying) {
+    card.className = 'relative w-full max-w-sm sm:max-w-md rounded-3xl p-6 sm:p-8 bg-slate-900 border-2 border-sky-500/60 shadow-2xl shadow-sky-500/20 text-center transform transition-all scale-100 opacity-100 pointer-events-auto';
+    nameEl.className = 'text-lg sm:text-xl font-bold text-sky-400 mb-1';
+    iconBg.className = 'relative w-16 h-16 rounded-full bg-sky-600 text-white flex items-center justify-center shadow-lg';
+    ring.className = 'absolute inset-0 rounded-full bg-sky-500/20 animate-pulse';
+    icon.className = 'material-symbols-outlined text-4xl animate-spin';
+    icon.textContent = 'progress_activity';
+  } else if (isSuccess) {
+    card.className = 'relative w-full max-w-sm sm:max-w-md rounded-3xl p-6 sm:p-8 bg-slate-900 border-2 border-emerald-500/60 shadow-2xl shadow-emerald-500/20 text-center transform transition-all scale-100 opacity-100 pointer-events-auto';
+    nameEl.className = 'text-lg sm:text-xl font-bold text-emerald-400 mb-1';
+    iconBg.className = 'relative w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg';
+    ring.className = 'absolute inset-0 rounded-full bg-emerald-500/20 animate-pulse-ring';
+    icon.className = 'material-symbols-outlined text-4xl';
     icon.textContent = 'check';
+  } else if (isOfflineQueued) {
+    card.className = 'relative w-full max-w-sm sm:max-w-md rounded-3xl p-6 sm:p-8 bg-slate-900 border-2 border-amber-500/60 shadow-2xl shadow-amber-500/20 text-center transform transition-all scale-100 opacity-100 pointer-events-auto';
+    nameEl.className = 'text-lg sm:text-xl font-bold text-amber-400 mb-1';
+    iconBg.className = 'relative w-16 h-16 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-lg';
+    ring.className = 'absolute inset-0 rounded-full bg-amber-500/20 animate-pulse';
+    icon.className = 'material-symbols-outlined text-4xl';
+    icon.textContent = 'cloud_queue';
   } else {
-    card.className = 'relative w-full rounded-xl p-4 bg-slate-900 border border-rose-500/60 text-center transform transition-all scale-100 opacity-100';
-    nameEl.className = 'text-base font-bold text-rose-400 mb-1';
-    iconBg.className = 'relative w-10 h-10 rounded-lg bg-rose-600 text-white flex items-center justify-center';
+    card.className = 'relative w-full max-w-sm sm:max-w-md rounded-3xl p-6 sm:p-8 bg-slate-900 border-2 border-rose-500/60 shadow-2xl shadow-rose-500/20 text-center transform transition-all scale-100 opacity-100 pointer-events-auto';
+    nameEl.className = 'text-lg sm:text-xl font-bold text-rose-400 mb-1';
+    iconBg.className = 'relative w-16 h-16 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-lg';
     ring.className = 'hidden';
+    icon.className = 'material-symbols-outlined text-4xl';
     icon.textContent = 'close';
   }
 
   modal.classList.remove('hidden');
 
-  // Auto-dismiss after 1.2 seconds
-  const autoDismissSec = currentSession?.kioskConfig?.feedbackMessage?.autoDismissSeconds || 1.2;
-  setTimeout(() => {
-    card.classList.remove('scale-100', 'opacity-100');
-    card.classList.add('scale-95', 'opacity-0');
-    setTimeout(() => {
-      modal.classList.add('hidden');
-    }, 200);
-  }, autoDismissSec * 1000);
+  if (!isVerifying) {
+    const autoDismissSec = isOfflineQueued
+      ? 2.5
+      : isSuccess
+        ? (currentSession?.kioskConfig?.feedbackMessage?.autoDismissSeconds || 1.4)
+        : 2.0;
+
+    flyoutDismissTimer = setTimeout(() => {
+      card.classList.remove('scale-100', 'opacity-100');
+      card.classList.add('scale-95', 'opacity-0');
+      setTimeout(() => {
+        modal.classList.add('hidden');
+      }, 200);
+    }, autoDismissSec * 1000);
+  }
 }
 
 function updateRecentFeed(name, id) {
@@ -628,7 +705,7 @@ function updateRecentFeed(name, id) {
   item.innerHTML = `
     <div class="flex items-center gap-2.5 min-w-0">
       <div class="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[11px] shrink-0">
-        ${name.charAt(0).toUpperCase()}
+        ${(name || 'S').charAt(0).toUpperCase()}
       </div>
       <div class="min-w-0">
         <p class="font-bold text-white truncate">${name}</p>
@@ -678,11 +755,16 @@ async function flushOfflineQueue() {
 
   for (const item of offlineQueue) {
     try {
-      await submitKioskCheckin({ ...item, kioskToken: currentSession.kioskToken });
+      const res = await submitKioskCheckin({ ...item, kioskToken: currentSession.kioskToken });
       await removeQueueItem(item.operationId);
+      const counterEl = document.getElementById('kiosk-live-counter');
+      if (res?.checkinCount && counterEl) {
+        counterEl.textContent = res.checkinCount;
+      }
     } catch (err) {
       if (err.isBusinessError || err.alreadyVisited || (err.status >= 400 && err.status < 500)) {
         console.warn('[OfflineQueue] Dropping invalid item from retry queue:', err.message);
+        await removeQueueItem(item.operationId);
       } else {
         remaining.push(item);
       }
@@ -694,7 +776,24 @@ async function flushOfflineQueue() {
   isSyncingOffline = false;
 }
 
-window.addEventListener('online', flushOfflineQueue);
+function updateNetworkStatus() {
+  const statusEl = document.getElementById('kiosk-footer-network');
+  const dotEl = statusEl?.previousElementSibling;
+  if (!statusEl) return;
+  if (navigator.onLine) {
+    statusEl.textContent = 'Kết nối ổn định (Edge Serverless)';
+    if (dotEl) dotEl.className = 'w-2 h-2 rounded-full bg-emerald-500';
+  } else {
+    statusEl.textContent = 'Đang ngoại tuyến (Offline Mode)';
+    if (dotEl) dotEl.className = 'w-2 h-2 rounded-full bg-amber-500 animate-pulse';
+  }
+}
+
+window.addEventListener('online', () => {
+  updateNetworkStatus();
+  flushOfflineQueue();
+});
+window.addEventListener('offline', updateNetworkStatus);
 setInterval(flushOfflineQueue, 15000);
 
 // =========================================================================

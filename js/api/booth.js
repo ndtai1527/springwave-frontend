@@ -50,14 +50,16 @@ export async function getKioskAuthConfig(code) {
   const cleanCode = (code || '').trim().toUpperCase();
   try {
     const res = await fetch(`${WORKER_BASE_URL}/api/kiosk/auth/${cleanCode}`, {
-      headers: { 'Accept': 'application/json' }
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(10000)
     });
     if (res.ok) return await res.json();
     throw new Error('Worker handshake returned ' + res.status);
   } catch (err) {
     // Fallback qua Backend VPS nếu Worker gặp sự cố
     const res2 = await fetch(`${API_BASE_URL}/api/booths/kiosk-auth/${cleanCode}`, {
-      headers: { 'Accept': 'application/json' }
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(10000)
     });
     if (!res2.ok) {
       const errData = await res2.json().catch(() => ({}));
@@ -77,14 +79,16 @@ export async function getKioskStudentCache(eventId, kioskToken) {
   };
   try {
     const res = await fetch(`${WORKER_BASE_URL}/api/kiosk/students/${eventId}`, {
-      headers
+      headers,
+      signal: AbortSignal.timeout(15000)
     });
     if (res.ok) return await res.json();
   } catch (e) {
     console.warn('Worker student cache fallback to backend API');
   }
   const res2 = await fetch(`${API_BASE_URL}/api/booths/kiosk-cache/${eventId}`, {
-    headers
+    headers,
+    signal: AbortSignal.timeout(15000)
   });
   if (!res2.ok) throw new Error('Không thể tải dữ liệu sinh viên sự kiện');
   return await res2.json();
@@ -119,12 +123,13 @@ export async function submitKioskCheckin({
     ...(kioskToken ? { Authorization: `Bearer ${kioskToken}` } : {})
   };
 
-  // Gửi tới Worker
+  // Gửi tới Worker trước
   try {
     const res = await fetch(`${WORKER_BASE_URL}/api/kiosk/checkin`, {
       method: 'POST',
       headers,
-      body: rawBody
+      body: rawBody,
+      signal: AbortSignal.timeout(10000)
     });
     const result = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -133,41 +138,51 @@ export async function submitKioskCheckin({
       // 401 từ Worker có thể do phiên / Edge worker chưa sync đồng bộ, cho phép fallback về Backend VPS
       err.isBusinessError = res.status !== 401 && res.status >= 400 && res.status < 500;
       err.alreadyVisited = result.alreadyVisited || false;
+      err.data = result;
       throw err;
     }
     return result;
   } catch (workerErr) {
-    // Nếu là lỗi nghiệp vụ (400, 403, 404, 409 hoặc duplicate), ném lỗi ngay
+    // Nếu là lỗi nghiệp vụ từ server (400, 403, 404, 409 hoặc duplicate), ném lỗi ngay
     if (workerErr.isBusinessError) {
       throw workerErr;
     }
 
-    // Nếu Worker gặp sự cố kết nối mạng hoặc lỗi 5xx, mới thử fallback qua Backend API
-    const res2 = await fetch(`${API_BASE_URL}/api/booths/manual-checkin`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(kioskToken ? { Authorization: `Bearer ${kioskToken}` } : {})
-      },
-      body: JSON.stringify({
-        eventId,
-        boothCode: payload.boothCode,
-        studentId,
-        attendanceId,
-        photoUrl: '',
-        deviceInfo: 'Kiosk Direct Fallback',
-        operationId
-      })
-    });
-    const fallbackRes = await res2.json().catch(() => ({}));
-    if (!res2.ok) {
-      const err = new Error(fallbackRes.error || workerErr.message || 'Checkin thất bại');
-      err.status = res2.status;
-      err.isBusinessError = res2.status >= 400 && res2.status < 500;
-      err.alreadyVisited = fallbackRes.alreadyVisited || false;
-      throw err;
+    console.warn('[KioskAPI] Worker checkin error, falling back to direct API:', workerErr.message);
+
+    // Nếu Worker gặp sự cố kết nối mạng hoặc lỗi 5xx/504, mới thử fallback qua Backend API
+    try {
+      const res2 = await fetch(`${API_BASE_URL}/api/booths/manual-checkin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(kioskToken ? { Authorization: `Bearer ${kioskToken}` } : {})
+        },
+        body: JSON.stringify({
+          eventId,
+          boothCode: payload.boothCode,
+          studentId,
+          attendanceId,
+          photoUrl: '',
+          deviceInfo: 'Kiosk Direct Fallback',
+          operationId
+        }),
+        signal: AbortSignal.timeout(10000)
+      });
+      const fallbackRes = await res2.json().catch(() => ({}));
+      if (!res2.ok) {
+        const err = new Error(fallbackRes.error || fallbackRes.message || workerErr.message || 'Checkin thất bại');
+        err.status = res2.status;
+        err.isBusinessError = res2.status >= 400 && res2.status < 500;
+        err.alreadyVisited = fallbackRes.alreadyVisited || false;
+        err.data = fallbackRes;
+        throw err;
+      }
+      return fallbackRes;
+    } catch (fallbackErr) {
+      if (fallbackErr.isBusinessError) throw fallbackErr;
+      throw new Error(fallbackErr.message || workerErr.message || 'Không thể kết nối đến máy chủ điểm danh');
     }
-    return fallbackRes;
   }
 }
 

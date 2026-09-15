@@ -3441,22 +3441,36 @@ function renderAttendanceTableRows(records, isPastEvent) {
   }
   empty.classList.add("hidden");
 
+  const activeBoothCode = (document.getElementById("multibooth-active-station-select")?.value || "").trim().toUpperCase();
+
   tbody.innerHTML = records.map(r => {
     const user = r.user || (r.isExternal ? { fullname: r.externalParticipant?.fullname, email: `External (${r.externalParticipant?.studentId || 'ID'})` } : {});
     const status = r.status || "absent";
+    const visitedList = (r.stationCheckins || []).map(s => (s.boothCode || '').toUpperCase()).filter(Boolean);
+    const hasVisitedActiveStation = activeBoothCode && visitedList.includes(activeBoothCode);
+
     let badge = '';
     if (status === 'present') {
-      badge = '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:#d1fae5;color:#059669">Present</span>';
+      const stationTag = visitedList.length > 0
+        ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 ml-1.5" title="${visitedList.length} trạm: ${visitedList.join(', ')}"><i class="fa-solid fa-store text-[9px]"></i>${visitedList.length} trạm</span>`
+        : '';
+      badge = `<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:#d1fae5;color:#059669">Present</span>${stationTag}`;
     } else if (status === 'late') {
       badge = '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:#fef3c7;color:#d97706">Late</span>';
     } else {
       badge = '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:#fee2e2;color:#dc2626">Absent</span>';
     }
     const isCheckedIn = status === 'present' || status === 'late';
-    const visitedList = (r.stationCheckins || []).map(s => s.boothCode);
     const visitedPills = visitedList.length > 0
-      ? `<div class="flex items-center gap-1 flex-wrap mt-1">${visitedList.map(c => `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60">${c}</span>`).join('')}</div>`
+      ? `<div class="flex items-center gap-1 flex-wrap mt-1"><span class="text-[10px] text-slate-500 font-medium">Đã ghé:</span>${visitedList.map(c => `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60" title="Trạm ${c}">${c}</span>`).join('')}</div>`
       : '';
+
+    const stationBtnText = hasVisitedActiveStation
+      ? `<i class="fa-solid fa-check text-[10px]"></i><span>Đã ghé</span>`
+      : `<i class="fa-solid fa-store text-[10px]"></i><span>+ Trạm</span>`;
+    const stationBtnClass = hasVisitedActiveStation
+      ? `btn-checkin-station-row text-xs py-1.5 px-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 transition-all inline-flex items-center gap-1 cursor-default opacity-85`
+      : `btn-checkin-station-row text-xs py-1.5 px-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold border border-indigo-200 transition-all inline-flex items-center gap-1 cursor-pointer`;
 
     return `
       <tr class="border-b border-[#ecedfa]">
@@ -3476,9 +3490,8 @@ function renderAttendanceTableRows(records, isPastEvent) {
         <td class="py-3.5 px-4 text-[#64748b] hidden sm:table-cell">${r.checkedInAt ? formatDate(r.checkedInAt) : "—"}</td>
         <td class="py-3.5 px-4 text-right">
           <div class="flex items-center justify-end gap-2">
-            <button class="btn-checkin-station-row text-xs py-1.5 px-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold border border-indigo-200 transition-all inline-flex items-center gap-1 cursor-pointer" data-att-id="${r._id}" title="Điểm danh vào trạm đang chọn">
-              <i class="fa-solid fa-store text-[10px]"></i>
-              <span>+ Trạm</span>
+            <button class="${stationBtnClass}" data-att-id="${r._id}" ${hasVisitedActiveStation ? 'data-already-visited="true"' : ''} title="${hasVisitedActiveStation ? `Đã điểm danh vào trạm ${activeBoothCode}` : 'Điểm danh vào trạm đang chọn'}">
+              ${stationBtnText}
             </button>
             ${isPastEvent
         ? (isCheckedIn
@@ -3508,6 +3521,16 @@ function renderAttendanceTableRows(records, isPastEvent) {
           defaultMessage: "Hãy chọn Trạm / Gian hàng bạn muốn điểm danh ở thanh trên trước khi bấm Check-in."
         });
         stationSelect?.focus();
+        return;
+      }
+
+      if (btn.dataset.alreadyVisited === "true") {
+        showAlertDialog({
+          titleKey: "common.notice",
+          defaultTitle: "Đã điểm danh",
+          messageKey: "org_dashboard.already_visited_station",
+          defaultMessage: `Sinh viên này đã được ghi nhận tham quan tại trạm ${boothCode} rồi.`
+        });
         return;
       }
 
