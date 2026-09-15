@@ -130,13 +130,14 @@ export async function submitKioskCheckin({
     if (!res.ok) {
       const err = new Error(result.error || result.message || 'Lỗi xử lý điểm danh tại máy chủ');
       err.status = res.status;
-      err.isBusinessError = res.status >= 400 && res.status < 500;
+      // 401 từ Worker có thể do phiên / Edge worker chưa sync đồng bộ, cho phép fallback về Backend VPS
+      err.isBusinessError = res.status !== 401 && res.status >= 400 && res.status < 500;
       err.alreadyVisited = result.alreadyVisited || false;
       throw err;
     }
     return result;
   } catch (workerErr) {
-    // Nếu là lỗi nghiệp vụ (4xx như duplicate, sự kiện chưa bắt đầu, mã không hợp lệ), ném lỗi ngay
+    // Nếu là lỗi nghiệp vụ (400, 403, 404, 409 hoặc duplicate), ném lỗi ngay
     if (workerErr.isBusinessError) {
       throw workerErr;
     }
